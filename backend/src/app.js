@@ -3,10 +3,12 @@ const express = require('express');
 const { loadCatalogue, withAbsoluteUrls, shortsFeed } = require('./catalogue');
 const { authMiddleware } = require('./auth');
 
-const MEDIA_DIR = path.join(__dirname, '..', 'media');
+const MEDIA_DIR = path.join(__dirname, '..', 'public', 'media');
 
 function createApp({ episodes = loadCatalogue(), mediaDir = MEDIA_DIR, auth = authMiddleware() } = {}) {
   const app = express();
+  // Behind Vercel's (or any) proxy, so absolute URLs come out as https.
+  app.set('trust proxy', true);
   app.use(express.json());
 
   // The web preview of the app runs on another origin. Native apps don't need CORS.

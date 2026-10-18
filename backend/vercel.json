@@ -1,0 +1,13 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api" },
+    { "source": "/health", "destination": "/api" }
+  ],
+  "headers": [
+    {
+      "source": "/media/(.*)",
+      "headers": [{ "key": "Access-Control-Allow-Origin", "value": "*" }]
+    }
+  ]
+}

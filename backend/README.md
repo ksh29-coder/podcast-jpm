@@ -7,7 +7,7 @@ It serves the episode catalogue, the Shorts feed, listening progress, and media 
 
 ```sh
 npm install
-npm run media   # generate placeholder audio/video/artwork into media/ (needs ffmpeg)
+npm run media   # regenerate placeholder audio/video/artwork in public/media/ (needs ffmpeg)
 npm start       # http://localhost:3000  (PORT to override)
 npm test
 ```
@@ -27,8 +27,15 @@ npm test
 Media paths in `data/episodes.json` are server-relative; the API returns them as absolute URLs
 (based on the request host, or `PUBLIC_BASE_URL` if set, e.g. behind a gateway).
 
+## Deploy to Vercel
+
+The project's **Root Directory** must be `backend`. `api/index.js` runs the Express app as a
+serverless function for `/api/*` and `/health` (see `vercel.json`); `public/media/` is served by
+Vercel's CDN, which supports Range requests.
+
 ## Not done yet
 
 - **Auth:** `AUTH_MODE=none` (the default) treats every request as `dev-user`. OIDC token validation
   goes in `src/auth.js` (build step 6).
-- **Progress** is kept in memory and lost on restart.
+- **Progress** is kept in memory and lost on restart; on Vercel it can reset between requests.
+- **Media on Vercel** is public CDN content; once auth exists it needs to move behind it.
