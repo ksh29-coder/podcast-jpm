@@ -9,6 +9,16 @@ function createApp({ episodes = loadCatalogue(), mediaDir = MEDIA_DIR, auth = au
   const app = express();
   app.use(express.json());
 
+  // The web preview of the app runs on another origin. Native apps don't need CORS.
+  app.use((req, res, next) => {
+    res.set('Access-Control-Allow-Origin', process.env.CORS_ORIGIN || '*');
+    res.set('Access-Control-Allow-Headers', 'Authorization, Content-Type, Range');
+    res.set('Access-Control-Allow-Methods', 'GET, PUT, OPTIONS');
+    res.set('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Accept-Ranges');
+    if (req.method === 'OPTIONS') return res.sendStatus(204);
+    next();
+  });
+
   // In-memory listening positions, keyed by user then episode. Lets a listener
   // resume on another device; swap for a real store before production.
   const progress = new Map();
