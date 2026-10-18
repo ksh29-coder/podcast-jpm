@@ -29,6 +29,15 @@ function createApp({ episodes = loadCatalogue(), mediaDir = MEDIA_DIR, auth = au
 
   app.get('/health', (req, res) => res.json({ ok: true }));
 
+  // Landing page so the bare domain shows the service is up.
+  app.get('/', (req, res) => {
+    res.json({
+      service: 'AI Dev Podcast backend',
+      ok: true,
+      endpoints: ['/api/episodes', '/api/episodes/:id', '/api/shorts', '/api/progress', '/media/*'],
+    });
+  });
+
   // Everything below requires a signed-in user, media included.
   app.use(auth);
 
