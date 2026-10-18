@@ -1,0 +1,57 @@
+[
+  {
+    "id": "ep001",
+    "title": "Pair Programming with an AI Assistant",
+    "description": "How our teams use AI coding assistants day to day, what works, and where they still trip up.",
+    "publishedAt": "2026-10-01T09:00:00Z",
+    "durationSec": 180,
+    "artworkUrl": "/media/ep001.jpg",
+    "audioUrl": "/media/ep001.mp3",
+    "videoUrl": "/media/ep001.mp4",
+    "chapters": [
+      { "title": "Intro", "startSec": 0 },
+      { "title": "Setting up your workflow", "startSec": 45 },
+      { "title": "Reviewing AI-written code", "startSec": 110 }
+    ],
+    "clips": [
+      {
+        "id": "ep001-c1",
+        "title": "Treat the AI like a junior pair",
+        "startSec": 50,
+        "endSec": 80,
+        "videoUrl": "/media/ep001-c1.mp4"
+      },
+      {
+        "id": "ep001-c2",
+        "title": "Never skip the code review",
+        "startSec": 115,
+        "endSec": 145,
+        "videoUrl": "/media/ep001-c2.mp4"
+      }
+    ]
+  },
+  {
+    "id": "ep002",
+    "title": "Testing in the Age of AI",
+    "description": "Generating tests with AI, keeping them meaningful, and catching regressions before they ship.",
+    "publishedAt": "2026-10-15T09:00:00Z",
+    "durationSec": 180,
+    "artworkUrl": "/media/ep002.jpg",
+    "audioUrl": "/media/ep002.mp3",
+    "videoUrl": "/media/ep002.mp4",
+    "chapters": [
+      { "title": "Intro", "startSec": 0 },
+      { "title": "AI-generated unit tests", "startSec": 40 },
+      { "title": "Keeping tests honest", "startSec": 120 }
+    ],
+    "clips": [
+      {
+        "id": "ep002-c1",
+        "title": "A test that can't fail is worthless",
+        "startSec": 125,
+        "endSec": 155,
+        "videoUrl": "/media/ep002-c1.mp4"
+      }
+    ]
+  }
+]
