@@ -25,6 +25,11 @@ test('lists episodes newest first with absolute media URLs', async () => {
   assert.strictEqual(eps[1].clips[0].videoUrl, `${base}/media/ep001-c1.mp4`);
 });
 
+test('root shows service status', async () => {
+  const body = await (await fetch(`${base}/`)).json();
+  assert.strictEqual(body.ok, true);
+});
+
 test('returns one episode, 404 for unknown', async () => {
   const ep = await (await fetch(`${base}/api/episodes/ep001`)).json();
   assert.strictEqual(ep.chapters.length, 3);
