@@ -1,6 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Image, PanResponder, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { ErrorState } from '../../components/ErrorState';
@@ -143,23 +143,85 @@ function VideoPane({ uri, startAt, onTime }: { uri: string; startAt: number; onT
   return <VideoView player={player} style={styles.video} nativeControls contentFit="contain" />;
 }
 
+// Tap or drag anywhere on the bar. While dragging, the bar and times follow
+// your finger; the seek happens when you let go.
 function Scrubber({ position, duration, onSeek }: { position: number; duration: number; onSeek: (sec: number) => void }) {
-  const [width, setWidth] = useState(0);
-  const fraction = duration > 0 ? Math.min(1, position / duration) : 0;
+  const track = useRef<View>(null);
+  const trackX = useRef(0);
+  const trackWidth = useRef(0);
+  // The player's position lags a seek slightly, so keep showing where you let
+  // go until it catches up.
+  const [dragSec, setDragSec] = useState<number | null>(null);
+  const [seekingTo, setSeekingTo] = useState<number | null>(null);
+  const latest = useRef({ duration, onSeek });
+  latest.current = { duration, onSeek };
+
+  const secAt = (pageX: number) => {
+    const { duration: d } = latest.current;
+    if (trackWidth.current <= 0 || d <= 0) return 0;
+    return Math.min(1, Math.max(0, (pageX - trackX.current) / trackWidth.current)) * d;
+  };
+
+  const pan = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      // Keep the page from scrolling away mid-drag.
+      onPanResponderTerminationRequest: () => false,
+      onShouldBlockNativeResponder: () => true,
+      onPanResponderGrant: (e) => {
+        const pageX = e.nativeEvent.pageX;
+        track.current?.measure((_x, _y, w, _h, px) => {
+          trackX.current = px;
+          trackWidth.current = w;
+          setDragSec(secAt(pageX));
+        });
+      },
+      onPanResponderMove: (e) => setDragSec(secAt(e.nativeEvent.pageX)),
+      onPanResponderRelease: (e) => {
+        const sec = secAt(e.nativeEvent.pageX);
+        setDragSec(null);
+        setSeekingTo(sec);
+        latest.current.onSeek(sec);
+      },
+      onPanResponderTerminate: () => setDragSec(null),
+    })
+  ).current;
+
+  useEffect(() => {
+    if (seekingTo !== null && Math.abs(position - seekingTo) < 2) setSeekingTo(null);
+  }, [position, seekingTo]);
+
+  // Give up waiting after a moment, e.g. if the seek was refused.
+  useEffect(() => {
+    if (seekingTo === null) return;
+    const t = setTimeout(() => setSeekingTo(null), 2000);
+    return () => clearTimeout(t);
+  }, [seekingTo]);
+
+  const shown = dragSec ?? seekingTo ?? position;
+  const fraction = duration > 0 ? Math.min(1, shown / duration) : 0;
   return (
     <View>
-      <Pressable
+      <View
+        ref={track}
         style={styles.scrubHit}
-        onLayout={(e) => setWidth(e.nativeEvent.layout.width)}
-        onPress={(e) => width > 0 && onSeek((e.nativeEvent.locationX / width) * duration)}
+        onLayout={(e) => (trackWidth.current = e.nativeEvent.layout.width)}
+        {...pan.panHandlers}
+        accessibilityRole="adjustable"
+        accessibilityLabel="Playback position"
       >
-        <View style={styles.scrubTrack}>
+        <View style={styles.scrubTrack} pointerEvents="none">
           <View style={[styles.scrubFill, { width: `${fraction * 100}%` }]} />
         </View>
-      </Pressable>
+        <View
+          pointerEvents="none"
+          style={[styles.scrubThumb, dragSec !== null && styles.scrubThumbActive, { left: `${fraction * 100}%` }]}
+        />
+      </View>
       <View style={styles.times}>
-        <Text style={styles.time}>{formatTime(position)}</Text>
-        <Text style={styles.time}>-{formatTime(duration - position)}</Text>
+        <Text style={styles.time}>{formatTime(shown)}</Text>
+        <Text style={styles.time}>-{formatTime(duration - shown)}</Text>
       </View>
     </View>
   );
@@ -176,9 +238,18 @@ const styles = StyleSheet.create({
   meta: { color: colors.textMuted, fontSize: 13 },
   title: { color: colors.text, fontSize: 22, fontWeight: '800', marginTop: 4 },
   chapterNow: { color: colors.accent, fontSize: 14, marginTop: 6, fontWeight: '600' },
-  scrubHit: { paddingVertical: 12, marginTop: 12 },
+  scrubHit: { paddingVertical: 16, marginTop: 8, justifyContent: 'center' },
   scrubTrack: { height: 4, borderRadius: 2, backgroundColor: colors.border },
   scrubFill: { height: 4, borderRadius: 2, backgroundColor: colors.accent },
+  scrubThumb: {
+    position: 'absolute',
+    width: 16,
+    height: 16,
+    marginLeft: -8,
+    borderRadius: 8,
+    backgroundColor: colors.accent,
+  },
+  scrubThumbActive: { width: 24, height: 24, marginLeft: -12, borderRadius: 12 },
   times: { flexDirection: 'row', justifyContent: 'space-between' },
   time: { color: colors.textMuted, fontSize: 12, fontVariant: ['tabular-nums'] },
   controls: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginVertical: 16 },
