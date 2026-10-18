@@ -38,7 +38,10 @@
           "supportsBackgroundPlayback": true,
           "supportsPictureInPicture": false
         }
-      ]
+      ],
+      "expo-status-bar",
+      "expo-asset",
+      "expo-font"
     ],
     "scheme": "aidevpodcast",
     "experiments": {
