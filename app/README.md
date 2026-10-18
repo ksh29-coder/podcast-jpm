@@ -11,7 +11,7 @@ Expo (React Native) app for iPhone and Android: build step 2–4 of the project 
 
 ## Try it on your iPhone
 
-1. Install **Expo Go** from the App Store.
+1. Install **Expo Go** from the App Store. The app uses Expo SDK 57, which Expo Go 57.x supports.
 2. Get a backend the phone can reach: either a deployed URL, or run `backend/` on your computer
    (`npm install && npm run media && npm start`) and use `http://<your-computer's-Wi-Fi-IP>:3000`.
 3. On your computer:

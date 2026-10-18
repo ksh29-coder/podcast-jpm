@@ -1,7 +1,7 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useIsFocused } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View, type ListViewToken } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View, type ViewToken } from 'react-native';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useVideoPlayer, VideoView } from 'expo-video';
@@ -24,7 +24,7 @@ export default function ShortsScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focused]);
 
-  const onViewable = useRef(({ viewableItems }: { viewableItems: ListViewToken[] }) => {
+  const onViewable = useRef(({ viewableItems }: { viewableItems: ViewToken[] }) => {
     if (viewableItems[0]) setVisibleId((viewableItems[0].item as Short).id);
   }).current;
 
