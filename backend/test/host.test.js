@@ -5,6 +5,24 @@ const { createApp } = require('../src/app');
 const { fakeVideo } = require('./fake-video');
 
 const PASSCODE = 'test-passcode';
+// Stands in for OpenRouter: replies like a slightly sloppy model would.
+const aiCalls = [];
+const fakeAi = {
+  model: 'test/fake',
+  async episodeInsights(input) {
+    aiCalls.push(input);
+    return {
+      summary: 'A talk about  Kubernetes operators.',
+      chapters: [{ startSec: 4.6, title: 'Operators' }, { startSec: 1, title: 'Welcome' }, { startSec: 9999, title: 'Out of range' }],
+      tags: ['#Kubernetes', 'kubernetes', 'Operators'],
+      mentions: [
+        { startSec: 4.5, name: 'Kubernetes', kind: 'tool', url: 'https://kubernetes.io' },
+        { startSec: 5, name: 'Evil', kind: 'tool', url: 'javascript:alert(1)' },
+      ],
+      shorts: [{ startSec: 1, endSec: 500, title: 'Why operators matter', why: 'Clear and self-contained.' }],
+    };
+  },
+};
 let server;
 let base;
 let video;
@@ -12,7 +30,7 @@ let tints = 0; // each computed backdrop color is different, so recomputes are v
 
 before(async () => {
   video = fakeVideo();
-  server = createApp({ db: new PGlite(), video, tint: async () => `#3344${String(++tints).padStart(2, '0')}`, hostPasscode: PASSCODE }).listen(0);
+  server = createApp({ db: new PGlite(), video, ai: fakeAi, tint: async () => `#3344${String(++tints).padStart(2, '0')}`, hostPasscode: PASSCODE }).listen(0);
   await new Promise((resolve) => server.once('listening', resolve));
   base = `http://127.0.0.1:${server.address().port}`;
 });
@@ -221,4 +239,50 @@ test('search needs two characters and treats % and _ literally', async () => {
   assert.deepStrictEqual(await get('/api/search?q=a'), { episodes: [], shorts: [], moments: [] });
   const r = await get('/api/search?q=%25%25');
   assert.strictEqual(r.episodes.length + r.shorts.length + r.moments.length, 0);
+});
+
+test('AI suggestions: generated from the transcript, cleaned, and applied by a host', async () => {
+  video.state.durationSec = 600;
+  video.state.captions = 'preparing';
+  const up = await host('POST', '/uploads', { kind: 'episode' });
+  const ep = (await host('POST', '/episodes', { title: 'Operators', videoId: up.body.videoId })).body;
+
+  // No transcript yet: the host is asked to wait.
+  const early = await host('POST', `/episodes/${ep.id}/ai`);
+  assert.strictEqual(early.status, 409);
+  assert.match(early.body.error, /transcript/i);
+
+  video.state.captions = 'ready';
+  const res = await host('POST', `/episodes/${ep.id}/ai`);
+  assert.strictEqual(res.status, 200);
+  const ai = res.body.ai;
+  assert.strictEqual(aiCalls.at(-1).cues.length, 2, 'the AI read the transcript');
+  assert.strictEqual(ai.summary, 'A talk about Kubernetes operators.');
+  assert.deepStrictEqual(ai.chapters, [{ startSec: 0, title: 'Welcome' }, { startSec: 4, title: 'Operators' }]);
+  assert.deepStrictEqual(ai.tags, ['kubernetes', 'operators']);
+  assert.deepStrictEqual(ai.mentions.map((m) => [m.name, m.url]), [['Kubernetes', 'https://kubernetes.io'], ['Evil', null]]);
+  assert.ok(ai.shorts[0].endSec - ai.shorts[0].startSec <= 90);
+  assert.strictEqual(ai.model, 'test/fake');
+
+  // Nothing reaches listeners until applied.
+  await host('PATCH', `/episodes/${ep.id}`, { status: 'published' });
+  let pub = await get(`/api/episodes/${ep.id}`);
+  assert.deepStrictEqual([pub.summary, pub.mentions], [null, []]);
+  assert.strictEqual(pub.ai, undefined, 'suggestions are host-only');
+
+  await host('PATCH', `/episodes/${ep.id}`, { summary: ai.summary, mentions: ai.mentions, chapters: ai.chapters, tags: ai.tags });
+  pub = await get(`/api/episodes/${ep.id}`);
+  assert.strictEqual(pub.summary, ai.summary);
+  assert.strictEqual(pub.mentions[0].name, 'Kubernetes');
+  assert.deepStrictEqual(pub.chapters, ai.chapters);
+
+  // Unsafe links are dropped even if sent directly.
+  await host('PATCH', `/episodes/${ep.id}`, { mentions: [{ startSec: 1, name: 'X', url: 'javascript:alert(1)' }] });
+  assert.strictEqual((await get(`/api/episodes/${ep.id}`)).mentions[0].url, null);
+  await host('PATCH', `/episodes/${ep.id}`, { summary: null });
+  assert.strictEqual((await get(`/api/episodes/${ep.id}`)).summary, null);
+});
+
+test('AI needs a transcript-capable episode', async () => {
+  assert.strictEqual((await host('POST', '/episodes/ep001/ai')).status, 404, 'seeded episodes have no uploaded video');
 });

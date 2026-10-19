@@ -6,6 +6,9 @@ export const API_URL = (process.env.EXPO_PUBLIC_API_URL || 'http://localhost:300
 
 export type Chapter = { title: string; startSec: number };
 
+// Something named in an episode (a tool, person, paper...), at the moment it's said.
+export type Mention = { startSec: number; name: string; kind: string; url: string | null };
+
 // What viewers did with an episode or Short. `liked` is this device's like.
 export type Stats = { likes: number; liked: boolean; views: number; comments: number };
 export type ItemType = 'episode' | 'short';
@@ -38,6 +41,9 @@ export type Episode = {
   tags: string[];
   // Dark backdrop color taken from the artwork; null until the server has worked it out.
   tint: string | null;
+  // Shown once a host approves them (often from AI suggestions).
+  summary: string | null;
+  mentions: Mention[];
   clips: Clip[];
 } & Stats;
 

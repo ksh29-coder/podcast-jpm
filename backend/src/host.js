@@ -52,6 +52,18 @@ function tags(value) {
   return clean;
 }
 
+function mentions(value) {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) throw httpError(400, 'mentions must be a list');
+  return value.slice(0, 25).map((m, i) => ({
+    startSec: num(m?.startSec, `mentions[${i}].startSec`, { required: true, min: 0 }),
+    name: str(m?.name, `mentions[${i}].name`, { required: true, max: 80 }),
+    kind: str(m?.kind, `mentions[${i}].kind`, { max: 20 }) ?? 'concept',
+    // Only plain https links reach listeners.
+    url: typeof m?.url === 'string' && /^https:\/\/\S+$/.test(m.url) ? m.url.slice(0, 300) : null,
+  }));
+}
+
 function chapters(value) {
   if (value === undefined) return undefined;
   if (!Array.isArray(value)) throw httpError(400, 'chapters must be a list');
@@ -125,10 +137,21 @@ function hostRouter({ store, engagement, baseUrl, passcode }) {
         description: str(b.description, 'description'),
         chapters: chapters(b.chapters),
         tags: tags(b.tags),
+        summary: b.summary === null ? null : str(b.summary, 'summary', { max: 800 }),
+        mentions: mentions(b.mentions),
         thumbnailSec: num(b.thumbnailSec, 'thumbnailSec', { min: 0 }),
         status: status(b.status),
       });
       if (!found) throw httpError(404, 'Episode not found');
+      res.json(await store.getEpisode(req.params.id, baseUrl(req), { host: true }));
+    })
+  );
+
+  // AI suggestions from the transcript (summary, chapters, tags, mentions, Shorts).
+  r.post(
+    '/episodes/:id/ai',
+    ah(async (req, res) => {
+      await store.generateInsights(req.params.id);
       res.json(await store.getEpisode(req.params.id, baseUrl(req), { host: true }));
     })
   );

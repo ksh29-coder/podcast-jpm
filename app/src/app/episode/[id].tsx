@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, Image, Linking, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { EpisodeVideo } from '../../components/EpisodeVideo';
 import { ErrorState } from '../../components/ErrorState';
@@ -225,7 +225,40 @@ function NowPlaying({ episode, startAt, startInVideo }: { episode: Episode; star
         </View>
 
         <Tags tags={episode.tags} />
+        {!!episode.summary && (
+          <View style={{ gap: spacing.xs }}>
+            <Text style={type.eyebrow}>In this episode</Text>
+            <Text style={type.body}>{episode.summary}</Text>
+          </View>
+        )}
         {!!episode.description && <Text style={[type.body, { color: colors.textMuted }]}>{episode.description}</Text>}
+
+        {episode.mentions.length > 0 && (
+          <View>
+            <Text style={[type.eyebrow, { marginBottom: spacing.xs }]}>Mentioned in this episode</Text>
+            {episode.mentions.map((m) => (
+              <View key={`${m.startSec}-${m.name}`} style={styles.chapter}>
+                <Pressable
+                  onPress={() => jumpTo(m.startSec)}
+                  style={({ pressed }) => [{ flex: 1, flexDirection: 'row', gap: spacing.lg, alignItems: 'center' }, pressed && { opacity: 0.6 }]}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${m.name}, mentioned at ${formatTime(m.startSec)}`}
+                >
+                  <Text style={[type.footnote, styles.chapterTime]}>{formatTime(m.startSec)}</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={type.body}>{m.name}</Text>
+                    <Text style={type.caption}>{m.kind}</Text>
+                  </View>
+                </Pressable>
+                {m.url?.startsWith('https://') && (
+                  <Pressable onPress={() => Linking.openURL(m.url!)} hitSlop={10} accessibilityRole="link" accessibilityLabel={`Open ${m.name} website`}>
+                    <Icon name="link" size={20} color={colors.textMuted} />
+                  </Pressable>
+                )}
+              </View>
+            ))}
+          </View>
+        )}
 
         {episode.chapters.length > 0 && (
           <View>

@@ -1,5 +1,16 @@
 import { getItem, setItem } from './storage';
-import { request, type Chapter, type Clip, type Episode, type Stats } from './api';
+import { request, type Chapter, type Clip, type Episode, type Mention, type Stats } from './api';
+
+// What the AI suggested for an episode, waiting for a host to apply it.
+export type AiSuggestions = {
+  summary: string;
+  chapters: Chapter[];
+  tags: string[];
+  mentions: Mention[];
+  shorts: { startSec: number; endSec: number; title: string; why: string }[];
+  model: string;
+  generatedAt: string;
+};
 
 // Host mode: uploading and publishing. Unlocked with the shared host passcode
 // until company sign-in exists; the passcode is kept on the device.
@@ -22,7 +33,7 @@ export type VideoState = {
 };
 
 type HostFields = { status: Status; video: VideoState | null; createdAt: string };
-export type HostEpisode = Omit<Episode, 'clips'> & HostFields & { thumbnailSec?: number; clips: HostShort[] };
+export type HostEpisode = Omit<Episode, 'clips'> & HostFields & { thumbnailSec?: number; ai?: AiSuggestions | null; clips: HostShort[] };
 export type HostShort = Clip & HostFields & Stats & { episodeId: string | null; episodeTitle: string | null; artworkUrl: string | null };
 
 export const MAX_SHORT_SEC = 90;
@@ -62,7 +73,11 @@ export function hostApi(passcode: string) {
     episode: (id: string) => call<HostEpisode>('GET', `/episodes/${id}`),
     createEpisode: (body: { title: string; description: string; chapters: Chapter[]; tags: string[]; videoId: string; thumbnailSec: number }) =>
       call<HostEpisode>('POST', '/episodes', body),
-    updateEpisode: (id: string, body: Partial<{ title: string; description: string; chapters: Chapter[]; tags: string[]; thumbnailSec: number; status: Status }>) =>
+    generateAi: (id: string) => call<HostEpisode>('POST', `/episodes/${id}/ai`),
+    updateEpisode: (
+      id: string,
+      body: Partial<{ title: string; description: string; chapters: Chapter[]; tags: string[]; thumbnailSec: number; status: Status; summary: string | null; mentions: Mention[] }>
+    ) =>
       call<HostEpisode>('PATCH', `/episodes/${id}`, body),
     shorts: () => call<HostShort[]>('GET', '/shorts'),
     clipShort: (body: { episodeId: string; title: string; startSec: number; endSec: number; focusX: number; tags: string[] }) =>

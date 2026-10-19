@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const { tintFromUrl } = require('./tint');
 const { parseVtt } = require('./vtt');
+const { cleanInsights } = require('./ai');
 
 // Database access and the JSON shapes the app sees. Media is either a static
 // file under /media (the seeded episodes) or a video on the video service.
@@ -29,7 +30,7 @@ const SHORT_SELECT = `
   left join episodes e on e.id = s.episode_id
   left join videos ev on ev.id = e.video_id`;
 
-function createStore({ db, video, tint = tintFromUrl }) {
+function createStore({ db, video, ai, tint = tintFromUrl }) {
   function episodeArtwork(row, baseUrl) {
     return row.playback_id ? video.thumbnailUrl(row.playback_id, row.thumbnail_sec) : absolutize(row.artwork_url, baseUrl);
   }
@@ -70,6 +71,9 @@ function createStore({ db, video, tint = tintFromUrl }) {
       chapters: row.chapters,
       tags: row.tags || [],
       tint: row.tint || null,
+      // Shown to listeners only once a host has approved them.
+      summary: row.summary || null,
+      mentions: row.mentions || [],
       clips: shorts.map((s) => toShort(s, baseUrl)),
     };
   }
@@ -221,7 +225,12 @@ function createStore({ db, video, tint = tintFromUrl }) {
       const out = toEpisode(rows[0], shorts.get(id) || [], baseUrl);
       if (!host) return out;
       return withHostFields(
-        { ...out, thumbnailSec: rows[0].thumbnail_sec, clips: (shorts.get(id) || []).map((s) => withHostFields(toShort(s, baseUrl), s)) },
+        {
+          ...out,
+          thumbnailSec: rows[0].thumbnail_sec,
+          ai: rows[0].ai || null,
+          clips: (shorts.get(id) || []).map((s) => withHostFields(toShort(s, baseUrl), s)),
+        },
         rows[0]
       );
     },
@@ -292,7 +301,7 @@ function createStore({ db, video, tint = tintFromUrl }) {
         await syncVideos(pending.map((r) => r.video_id));
         ({ rows } = await db.query(`${EPISODE_SELECT} order by e.created_at desc`));
       }
-      return rows.map((r) => withHostFields(toEpisode(r, [], baseUrl), r));
+      return rows.map((r) => withHostFields({ ...toEpisode(r, [], baseUrl), ai: r.ai || null }, r));
     },
 
     async hostShorts(baseUrl) {
@@ -303,6 +312,30 @@ function createStore({ db, video, tint = tintFromUrl }) {
         ({ rows } = await db.query(`${SHORT_SELECT} order by s.created_at desc`));
       }
       return rows.map((r) => withHostFields(toShort(r, baseUrl), r));
+    },
+
+    // Ask the AI for suggestions from the episode's transcript and keep them
+    // for the host to review. Needs the transcript, so it may ask the host to wait.
+    async generateInsights(episodeId) {
+      if (!ai) throw httpError(503, 'AI isn’t set up on this server');
+      // Bring the upload's processing state up to date first.
+      const { rows: vids } = await db.query('select video_id from episodes where id = $1', [episodeId]);
+      if (vids[0]?.video_id) await syncVideos([vids[0].video_id]);
+      const { rows } = await db.query(
+        `select e.title, e.description, v.*, v.duration_sec as video_duration_sec from episodes e join videos v on v.id = e.video_id where e.id = $1`,
+        [episodeId]
+      );
+      const v = rows[0];
+      if (!v) throw httpError(404, 'This episode has no uploaded video to read');
+      const status = await ensureTranscript(v);
+      if (status === 'unavailable') throw httpError(409, 'This episode has no spoken audio, so there’s nothing for the AI to read');
+      if (status !== 'ready') throw httpError(409, 'The transcript is still being prepared. Try again in a few minutes.');
+      const { rows: cueRows } = await db.query('select start_sec, end_sec, text from transcript_cues where video_id = $1 order by idx', [v.id]);
+      const cues = cueRows.map((c) => ({ startSec: c.start_sec, endSec: c.end_sec, text: c.text }));
+      const durationSec = v.video_duration_sec || cues.at(-1)?.endSec || 0;
+      const raw = await ai.episodeInsights({ title: v.title, description: v.description, durationSec, cues });
+      const insights = { ...cleanInsights(raw, { durationSec, cues }), model: ai.model, generatedAt: new Date().toISOString() };
+      await db.query('update episodes set ai = $2, updated_at = now() where id = $1', [episodeId, JSON.stringify(insights)]);
     },
 
     async createUpload({ kind }) {
@@ -339,6 +372,8 @@ function createStore({ db, video, tint = tintFromUrl }) {
         thumbnailSec: 'thumbnail_sec',
         chapters: 'chapters',
         tags: 'tags',
+        summary: 'summary',
+        mentions: 'mentions',
       });
     },
 
@@ -396,7 +431,7 @@ function createStore({ db, video, tint = tintFromUrl }) {
 
     const set = {};
     for (const [key, col] of Object.entries(columns)) {
-      if (fields[key] !== undefined) set[col] = key === 'chapters' ? JSON.stringify(fields[key]) : fields[key];
+      if (fields[key] !== undefined) set[col] = key === 'chapters' || key === 'mentions' ? JSON.stringify(fields[key]) : fields[key];
     }
     if (fields.status !== undefined) {
       set.status = fields.status;

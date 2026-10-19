@@ -75,6 +75,11 @@ alter table episodes add column if not exists tags text[] not null default '{}';
 -- Backdrop color picked from the artwork; worked out on first read, cleared
 -- when the cover frame changes.
 alter table episodes add column if not exists tint text;
+-- AI suggestions for hosts (summary, chapters, tags, mentions, Shorts), and
+-- the parts a host has approved for listeners.
+alter table episodes add column if not exists ai jsonb;
+alter table episodes add column if not exists summary text;
+alter table episodes add column if not exists mentions jsonb not null default '[]';
 alter table shorts add column if not exists tags text[] not null default '{}';
 
 -- Transcript: generated captions, stored line by line for the follow-along
