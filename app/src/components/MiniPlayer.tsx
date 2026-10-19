@@ -3,14 +3,14 @@ import { router } from 'expo-router';
 import { NativeTabs } from 'expo-router/unstable-native-tabs';
 import { usePlayer } from '../lib/player';
 import { colors, radius, spacing, type } from '../theme';
-import { Icon } from './Icon';
+import { Icon, skipIcon } from './Icon';
 
 // Now-playing bar in the tab bar's accessory slot. iOS draws the glass behind
 // it and shows it in two placements: 'regular' above the tab bar, and
 // 'inline' squeezed into the bar once it shrinks on scroll. Both copies render
 // at once, so all state comes from the shared player.
 export function MiniPlayer() {
-  const { episode, status, togglePlay, seekBy } = usePlayer();
+  const { episode, status, togglePlay, seekBy, prefs } = usePlayer();
   const placement = NativeTabs.BottomAccessory.usePlacement();
   if (!episode) return null;
 
@@ -44,8 +44,8 @@ export function MiniPlayer() {
         </Text>
       </Pressable>
       {playPause}
-      <Pressable onPress={() => seekBy(30)} hitSlop={10} accessibilityRole="button" accessibilityLabel="Forward 30 seconds">
-        <Icon name="forward30" size={22} />
+      <Pressable onPress={() => seekBy(prefs.skipForward)} hitSlop={10} accessibilityRole="button" accessibilityLabel={`Forward ${prefs.skipForward} seconds`}>
+        <Icon name={skipIcon('forward', prefs.skipForward)} size={22} />
       </Pressable>
     </View>
   );

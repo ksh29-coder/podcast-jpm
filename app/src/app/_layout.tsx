@@ -47,6 +47,14 @@ export default function RootLayout() {
               headerShown: false,
             }}
           />
+          <Stack.Screen
+            name="playback"
+            options={{ presentation: 'formSheet', sheetAllowedDetents: [0.75, 1], sheetGrabberVisible: true, headerShown: false }}
+          />
+          <Stack.Screen
+            name="transcript/[id]"
+            options={{ presentation: 'formSheet', sheetAllowedDetents: [0.85, 1], sheetGrabberVisible: true, headerShown: false }}
+          />
           {/* Host mode has its own stack and headers (src/app/host/_layout.tsx). */}
           <Stack.Screen name="host" options={{ headerShown: false }} />
         </Stack>

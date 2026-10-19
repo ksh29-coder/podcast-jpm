@@ -180,3 +180,45 @@ test('episodes carry a backdrop color from their artwork, reset when the cover c
   await host('PATCH', '/episodes/ep001', { thumbnailSec: 3 });
   assert.notStrictEqual((await get('/api/episodes/ep001')).tint, first);
 });
+
+test('transcripts: generated captions become a searchable transcript', async () => {
+  video.state.durationSec = 600;
+  video.state.captions = 'preparing';
+  const up = await host('POST', '/uploads', { kind: 'episode' });
+  const ep = (await host('POST', '/episodes', { title: 'Operators deep dive', videoId: up.body.videoId })).body;
+
+  // Drafts have no public transcript.
+  assert.strictEqual((await fetch(`${base}/api/episodes/${ep.id}/transcript`)).status, 404);
+  await host('PATCH', `/episodes/${ep.id}`, { status: 'published' });
+
+  assert.deepStrictEqual(await get(`/api/episodes/${ep.id}/transcript`), { status: 'generating', cues: [] });
+  video.state.captions = 'ready';
+  const t = await get(`/api/episodes/${ep.id}/transcript`);
+  assert.strictEqual(t.status, 'ready');
+  assert.deepStrictEqual(t.cues[1], { startSec: 4, endSec: 9.5, text: 'Today we talk about Kubernetes operators' });
+
+  const found = await get('/api/search?q=kubernetes');
+  // Other published episodes share the fake transcript, so look for this one.
+  const moment = found.moments.find((m) => m.episodeId === ep.id);
+  assert.deepStrictEqual([moment.startSec, moment.episodeTitle], [4, 'Operators deep dive']);
+  assert.ok((await get('/api/search?q=deep%20dive')).episodes.some((e) => e.id === ep.id));
+});
+
+test('an older video without captions gets them requested', async () => {
+  // Make an asset as if uploaded before captions were switched on.
+  video.state.captions = 'preparing';
+  const up = await host('POST', '/uploads', { kind: 'episode' });
+  await host('GET', `/videos/${up.body.videoId}`);
+  for (const a of video.assets.values()) a.captionsRequested = false;
+  const ep = (await host('POST', '/episodes', { title: 'Old upload', videoId: up.body.videoId })).body;
+  await host('PATCH', `/episodes/${ep.id}`, { status: 'published' });
+  assert.ok(video.state.calls.some(([name]) => name === 'generateSubtitles'));
+  assert.strictEqual((await get(`/api/episodes/${ep.id}/transcript`)).status, 'generating');
+  video.state.captions = 'ready';
+});
+
+test('search needs two characters and treats % and _ literally', async () => {
+  assert.deepStrictEqual(await get('/api/search?q=a'), { episodes: [], shorts: [], moments: [] });
+  const r = await get('/api/search?q=%25%25');
+  assert.strictEqual(r.episodes.length + r.shorts.length + r.moments.length, 0);
+});

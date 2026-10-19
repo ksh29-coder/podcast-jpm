@@ -52,6 +52,15 @@ export type Comment = {
   mine?: boolean;
 };
 
+export type Cue = { startSec: number; endSec: number; text: string };
+// 'generating' while captions are made (a few minutes after publishing);
+// 'unavailable' for videos without sound.
+export type Transcript = { status: 'none' | 'generating' | 'ready' | 'unavailable'; cues: Cue[] };
+
+// A transcript line that matched a search, linked to the moment it's said.
+export type Moment = { episodeId: string; episodeTitle: string; startSec: number; text: string };
+export type SearchResults = { episodes: Episode[]; shorts: Short[]; moments: Moment[] };
+
 export type Progress = Record<string, { positionSec: number; updatedAt: string }>;
 
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -81,6 +90,8 @@ export const api = {
   episodes: () => request<Episode[]>('/api/episodes'),
   episode: (id: string) => request<Episode>(`/api/episodes/${id}`),
   shorts: () => request<Short[]>('/api/shorts'),
+  transcript: (episodeId: string) => request<Transcript>(`/api/episodes/${episodeId}/transcript`),
+  search: (q: string) => request<SearchResults>(`/api/search?q=${encodeURIComponent(q)}`),
   progress: () => request<Progress>('/api/progress'),
   setLiked: (type: ItemType, id: string, liked: boolean) =>
     request<Stats>(`/api/items/${type}/${id}/like`, { method: liked ? 'PUT' : 'DELETE' }),

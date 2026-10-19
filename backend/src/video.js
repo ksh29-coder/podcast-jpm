@@ -36,6 +36,8 @@ function muxVideo({ tokenId = process.env.MUX_TOKEN_ID, tokenSecret = process.en
         new_asset_settings: {
           playback_policies: ['public'],
           video_quality: 'basic',
+          // Speech-to-text captions; they double as the transcript.
+          inputs: [{ generated_subtitles: [{ language_code: 'en', name: 'English (generated)' }] }],
           ...(audio && { static_renditions: [{ resolution: 'audio-only' }] }),
         },
       });
@@ -64,6 +66,7 @@ function muxVideo({ tokenId = process.env.MUX_TOKEN_ID, tokenSecret = process.en
       const data = await call('GET', `/assets/${assetId}`);
       const status = data.status === 'ready' ? 'ready' : data.status === 'errored' ? 'errored' : 'processing';
       const audio = (data.static_renditions?.files || []).find((f) => f.resolution === 'audio-only');
+      const text = (data.tracks || []).find((t) => t.type === 'text' && t.text_source === 'generated_vod');
       return {
         status,
         playbackId: data.playback_ids?.find((p) => p.policy === 'public')?.id || null,
@@ -73,7 +76,28 @@ function muxVideo({ tokenId = process.env.MUX_TOKEN_ID, tokenSecret = process.en
         // Mux skips the audio-only file when the video has no sound.
         audioMissing: audio?.status === 'skipped' || audio?.status === 'errored',
         error: status === 'errored' ? data.errors?.messages?.join('; ') || 'Processing failed' : null,
+        // Generated captions: { id, status: 'preparing' | 'ready' | 'errored' } or null.
+        textTrack: text ? { id: text.id, status: text.status } : null,
+        hasAudioTrack: (data.tracks || []).some((t) => t.type === 'audio'),
       };
+    },
+
+    // Ask for captions on a video uploaded before captions were switched on.
+    async generateSubtitles(assetId) {
+      const asset = await call('GET', `/assets/${assetId}`);
+      const audio = (asset.tracks || []).find((t) => t.type === 'audio' && t.primary !== false);
+      if (!audio) return false;
+      await call('POST', `/assets/${assetId}/tracks/${audio.id}/generate-subtitles`, {
+        generated_subtitles: [{ language_code: 'en', name: 'English (generated)' }],
+      });
+      return true;
+    },
+
+    // The captions as WebVTT text.
+    async fetchCaptions(playbackId, trackId) {
+      const res = await fetch(`https://stream.mux.com/${playbackId}/text/${trackId}.vtt`);
+      if (!res.ok) throw Object.assign(new Error(`Captions download failed: ${res.status}`), { status: 502 });
+      return res.text();
     },
 
     hlsUrl: (playbackId) => `https://stream.mux.com/${playbackId}.m3u8`,

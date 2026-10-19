@@ -4,7 +4,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { EpisodeVideo } from '../../components/EpisodeVideo';
 import { ErrorState } from '../../components/ErrorState';
 import { Glass } from '../../components/Glass';
-import { Icon } from '../../components/Icon';
+import { Icon, skipIcon } from '../../components/Icon';
 import { Scrubber } from '../../components/Scrubber';
 import { shareItem } from '../../components/engage/share';
 import { Tags } from '../../components/engage/Tags';
@@ -14,8 +14,6 @@ import { formatDate, formatDuration, formatTime } from '../../lib/format';
 import { usePlayer } from '../../lib/player';
 import { useFetch } from '../../lib/useFetch';
 import { colors, radius, spacing, tintWash, type, withAlpha } from '../../theme';
-
-const RATES = [1, 1.25, 1.5, 2, 0.75];
 
 export default function EpisodeScreen() {
   // `t` comes from a Short: start the full episode at that clip.
@@ -81,6 +79,9 @@ function NowPlaying({ episode, startAt, startInVideo }: { episode: Episode; star
     }
   };
 
+  const sleep = player.sleep;
+  const sleepLabel = !sleep ? null : sleep.kind === 'time' ? formatTime(player.sleepLeftSec ?? 0) : 'End of chapter';
+
   const artSize = Math.min(width - spacing.xxxl * 2, 340);
   const glow = withAlpha(episode.tint || colors.tintFallback, 0.85);
 
@@ -129,15 +130,20 @@ function NowPlaying({ episode, startAt, startInVideo }: { episode: Episode; star
             <Scrubber position={position} duration={duration} onSeek={(s) => (isCurrent ? player.seekTo(s) : player.playEpisode(episode, s))} />
             <View style={styles.controls}>
               <Pressable
-                onPress={() => isCurrent && player.setRate(nextRate(player.status.playbackRate))}
+                onPress={() => router.push('/playback')}
                 style={styles.side}
                 accessibilityRole="button"
-                accessibilityLabel={`Playback speed ${isCurrent ? player.status.playbackRate : 1} times`}
+                accessibilityLabel={`Playback speed ${player.prefs.rate} times. Change speed, sleep timer and skip lengths`}
               >
-                <Text style={[type.headline, { fontVariant: ['tabular-nums'] }]}>{isCurrent ? `${player.status.playbackRate}×` : '1×'}</Text>
+                <Text style={[type.headline, { fontVariant: ['tabular-nums'] }]}>{player.prefs.rate}×</Text>
               </Pressable>
-              <Pressable onPress={() => isCurrent && player.seekBy(-15)} hitSlop={8} accessibilityRole="button" accessibilityLabel="Back 15 seconds">
-                <Icon name="back15" size={32} />
+              <Pressable
+                onPress={() => isCurrent && player.seekBy(-player.prefs.skipBack)}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel={`Back ${player.prefs.skipBack} seconds`}
+              >
+                <Icon name={skipIcon('back', player.prefs.skipBack)} size={32} />
               </Pressable>
               <Pressable
                 style={({ pressed }) => [styles.playButton, pressed && { transform: [{ scale: 0.96 }] }]}
@@ -147,8 +153,13 @@ function NowPlaying({ episode, startAt, startInVideo }: { episode: Episode; star
               >
                 <Icon name={playing ? 'pause' : 'play'} size={32} color={colors.accentText} />
               </Pressable>
-              <Pressable onPress={() => isCurrent && player.seekBy(30)} hitSlop={8} accessibilityRole="button" accessibilityLabel="Forward 30 seconds">
-                <Icon name="forward30" size={32} />
+              <Pressable
+                onPress={() => isCurrent && player.seekBy(player.prefs.skipForward)}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel={`Forward ${player.prefs.skipForward} seconds`}
+              >
+                <Icon name={skipIcon('forward', player.prefs.skipForward)} size={32} />
               </Pressable>
               <Pressable
                 onPress={() => shareItem({ title: episode.title, path: `/episode/${episode.id}` })}
@@ -158,6 +169,27 @@ function NowPlaying({ episode, startAt, startInVideo }: { episode: Episode; star
               >
                 <Icon name="share" size={22} />
               </Pressable>
+            </View>
+            <View style={styles.secondary}>
+              <Glass style={styles.pill} interactive>
+                <Pressable style={styles.pillInner} onPress={() => router.push(`/transcript/${episode.id}`)} accessibilityRole="button">
+                  <Icon name="transcript" size={17} />
+                  <Text style={styles.pillText}>Transcript</Text>
+                </Pressable>
+              </Glass>
+              {isCurrent && (
+                <Glass style={styles.pill} interactive>
+                  <Pressable
+                    style={styles.pillInner}
+                    onPress={() => router.push('/playback')}
+                    accessibilityRole="button"
+                    accessibilityLabel={sleepLabel ? `Sleep timer: ${sleepLabel}` : 'Sleep timer'}
+                  >
+                    <Icon name={player.sleep ? 'moonFill' : 'moon'} size={17} color={player.sleep ? colors.highlight : colors.text} />
+                    <Text style={[styles.pillText, player.sleep && { color: colors.highlight }]}>{sleepLabel ?? 'Sleep'}</Text>
+                  </Pressable>
+                </Glass>
+              )}
             </View>
           </>
         )}
@@ -221,10 +253,6 @@ function NowPlaying({ episode, startAt, startInVideo }: { episode: Episode; star
   );
 }
 
-function nextRate(rate: number) {
-  return RATES[(RATES.indexOf(rate) + 1) % RATES.length];
-}
-
 const styles = StyleSheet.create({
   page: { paddingHorizontal: spacing.xxl, paddingBottom: spacing.huge, gap: spacing.xxl },
   toggle: { flexDirection: 'row', alignSelf: 'center', borderRadius: radius.full, padding: 3 },
@@ -238,6 +266,7 @@ const styles = StyleSheet.create({
   side: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' },
   playButton: { width: 76, height: 76, borderRadius: 38, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' },
   engage: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  secondary: { flexDirection: 'row', justifyContent: 'center', gap: spacing.sm, marginTop: -spacing.sm },
   pill: { borderRadius: radius.full },
   pillInner: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs + 2, paddingHorizontal: spacing.md + 2, paddingVertical: spacing.sm },
   pillText: { ...type.subhead, color: colors.text, fontWeight: '700', fontVariant: ['tabular-nums'] },
