@@ -3,7 +3,9 @@ const assert = require('node:assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { PGlite } = require('@electric-sql/pglite');
 const { createApp } = require('../src/app');
+const { fakeVideo } = require('./fake-video');
 
 let server;
 let base;
@@ -11,7 +13,7 @@ let base;
 before(async () => {
   const mediaDir = fs.mkdtempSync(path.join(os.tmpdir(), 'media-'));
   fs.writeFileSync(path.join(mediaDir, 'ep001.mp3'), Buffer.alloc(1000, 1));
-  server = createApp({ mediaDir }).listen(0);
+  server = createApp({ db: new PGlite(), video: fakeVideo(), mediaDir }).listen(0);
   await new Promise((resolve) => server.once('listening', resolve));
   base = `http://127.0.0.1:${server.address().port}`;
 });

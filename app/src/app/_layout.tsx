@@ -16,7 +16,15 @@ export default function RootLayout() {
         }}
       >
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="episode/[id]" options={{ title: '', headerBackTitle: 'Back' }} />
+        <Stack.Screen
+          name="episode/[id]"
+          // iOS 26 lets you swipe back from anywhere, which hijacks dragging the
+          // progress bar. Keep swipe-back to the screen edge here.
+          options={{ title: '', headerBackTitle: 'Back', fullScreenGestureEnabled: false }}
+        />
+        <Stack.Screen name="comments/[type]/[id]" options={{ title: 'Comments', presentation: 'modal' }} />
+        {/* Host mode has its own stack and headers (src/app/host/_layout.tsx). */}
+        <Stack.Screen name="host" options={{ headerShown: false }} />
       </Stack>
     </PlayerProvider>
   );
