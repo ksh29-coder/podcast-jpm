@@ -41,6 +41,7 @@ export default function HostLayout() {
           options={Platform.OS === 'web' ? { title: 'Record a Short' } : { headerShown: false, presentation: 'fullScreenModal', gestureEnabled: false }}
         />
         <Stack.Screen name="clip/[id]" options={{ title: 'Make a Short' }} />
+        <Stack.Screen name="ai/[id]" options={{ title: 'AI assist' }} />
       </Stack>
     </HostGate>
   );

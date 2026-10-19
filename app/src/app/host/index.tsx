@@ -161,12 +161,18 @@ export default function HostHome() {
           busy={busyId === ep.id}
           onStatus={(s) => setStatus('episode', ep.id, s)}
           extra={
-            isWeb &&
-            !(ep.video && ep.video.status !== 'ready') && (
-              <Pressable style={[ui.button, ui.secondary]} onPress={() => router.push(`/host/clip/${ep.id}`)}>
-                <Text style={ui.secondaryText}>Make a Short</Text>
-              </Pressable>
-            )
+            <>
+              {isWeb && !(ep.video && ep.video.status !== 'ready') && (
+                <Pressable style={[ui.button, ui.secondary]} onPress={() => router.push(`/host/clip/${ep.id}`)}>
+                  <Text style={ui.secondaryText}>Make a Short</Text>
+                </Pressable>
+              )}
+              {ep.video?.status === 'ready' && (
+                <Pressable style={[ui.button, ui.secondary]} onPress={() => router.push(`/host/ai/${ep.id}`)}>
+                  <Text style={ui.secondaryText}>{ep.ai ? 'AI suggestions' : 'AI assist'}</Text>
+                </Pressable>
+              )}
+            </>
           }
         />
       ))}

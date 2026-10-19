@@ -42,6 +42,7 @@ const ICONS = {
   transcript: { sf: 'quote.bubble', ion: 'reader-outline' },
   search: { sf: 'magnifyingglass', ion: 'search' },
   minus: { sf: 'minus', ion: 'remove' },
+  link: { sf: 'arrow.up.right.square', ion: 'open-outline' },
   plus: { sf: 'plus', ion: 'add' },
 } as const satisfies Record<string, { sf: SFSymbol; ion: keyof typeof Ionicons.glyphMap }>;
 

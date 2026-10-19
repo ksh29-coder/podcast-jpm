@@ -3,6 +3,7 @@ const express = require('express');
 const { authMiddleware } = require('./auth');
 const { connect, migrate } = require('./db');
 const { createEngagement } = require('./engagement');
+const { openRouterAi } = require('./ai');
 const { hostRouter } = require('./host');
 const { createStore } = require('./store');
 const { muxVideo } = require('./video');
@@ -12,9 +13,9 @@ const MEDIA_DIR = path.join(__dirname, '..', 'public', 'media');
 // Express 4 doesn't catch rejected promises from handlers.
 const ah = (fn) => (req, res, next) => fn(req, res, next).catch(next);
 
-function createApp({ db = connect(), video = muxVideo(), tint, mediaDir = MEDIA_DIR, auth = authMiddleware(), hostPasscode } = {}) {
+function createApp({ db = connect(), video = muxVideo(), ai = openRouterAi(), tint, mediaDir = MEDIA_DIR, auth = authMiddleware(), hostPasscode } = {}) {
   const app = express();
-  const store = createStore({ db, video, ...(tint && { tint }) });
+  const store = createStore({ db, video, ai, ...(tint && { tint }) });
   const engagement = createEngagement({ db });
 
   // Tables are created (and seeded) on first use, so a fresh database needs no
