@@ -1,11 +1,10 @@
-// eslint-disable-next-line import/no-named-as-default -- hls.js only has a default export in its types.
-import Hls from 'hls.js';
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { router } from 'expo-router';
 import { formatTime } from '../../lib/format';
 import { MAX_SHORT_SEC, parseTags, type HostEpisode } from '../../lib/host';
 import { colors } from '../../theme';
+import { attachHls } from '../hls.web';
 import { useHost } from './HostGate';
 import { ui } from './ui';
 
@@ -39,19 +38,10 @@ function Editor({ episode }: { episode: HostEpisode }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Chrome and Firefox can't play HLS (.m3u8) by themselves; Safari can.
+  // Chrome and Firefox need hls.js for our .m3u8 streams (see hls.web.ts).
   useEffect(() => {
     const el = videoRef.current;
-    if (!el) return;
-    const src = episode.videoUrl;
-    if (!src.includes('.m3u8') || el.canPlayType('application/vnd.apple.mpegurl')) {
-      el.src = src;
-      return;
-    }
-    const hls = new Hls();
-    hls.loadSource(src);
-    hls.attachMedia(el);
-    return () => hls.destroy();
+    return el ? attachHls(el, episode.videoUrl) : undefined;
   }, [episode.videoUrl]);
 
   const length = end - start;
