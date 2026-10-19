@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const { tintFromUrl } = require('./tint');
 const { parseVtt } = require('./vtt');
 const { cleanInsights } = require('./ai');
+const { cuesToVtt } = require('./transcribe');
 
 // Database access and the JSON shapes the app sees. Media is either a static
 // file under /media (the seeded episodes) or a video on the video service.
@@ -17,6 +18,7 @@ function absolutize(url, baseUrl) {
 
 const EPISODE_SELECT = `
   select e.*, v.playback_id, v.status as video_status, v.audio_ready, v.has_audio,
+         v.transcript_status, v.transcript_source,
          v.duration_sec as video_duration_sec, v.error as video_error
   from episodes e left join videos v on v.id = e.video_id`;
 
@@ -30,7 +32,7 @@ const SHORT_SELECT = `
   left join episodes e on e.id = s.episode_id
   left join videos ev on ev.id = e.video_id`;
 
-function createStore({ db, video, ai, tint = tintFromUrl }) {
+function createStore({ db, video, ai, transcriber, tint = tintFromUrl }) {
   function episodeArtwork(row, baseUrl) {
     return row.playback_id ? video.thumbnailUrl(row.playback_id, row.thumbnail_sec) : absolutize(row.artwork_url, baseUrl);
   }
@@ -89,6 +91,7 @@ function createStore({ db, video, ai, tint = tintFromUrl }) {
             status: row.video_status,
             error: row.video_error,
             ...(row.audio_ready !== undefined && { audioReady: row.audio_ready, hasAudio: row.has_audio }),
+            ...(row.transcript_status !== undefined && { transcriptStatus: row.transcript_status, transcriptSource: row.transcript_source }),
           }
         : null,
       createdAt: new Date(row.created_at).toISOString(),
@@ -172,8 +175,35 @@ function createStore({ db, video, ai, tint = tintFromUrl }) {
 
   // Moves a video's transcript along: asks for captions if nobody has, and
   // stores them once they're ready. Returns the transcript status.
-  async function ensureTranscript(v) {
-    if (v.transcript_status === 'ready' || v.transcript_status === 'unavailable') return v.transcript_status;
+  async function ensureTranscript(v, { thorough = false, force = false, baseUrl } = {}) {
+    if (!force && (v.transcript_status === 'ready' || v.transcript_status === 'unavailable')) return v.transcript_status;
+    if (v.has_audio === false && v.status === 'ready') return setStatus('unavailable');
+
+    // The better transcription (with speakers) runs on publish or when a host
+    // asks, since it takes a few seconds per hour of audio.
+    if (thorough && transcriber && v.playback_id && v.audio_ready) {
+      const recent = v.transcript_status === 'transcribing' && v.transcript_started_at && Date.now() - new Date(v.transcript_started_at) < 5 * 60_000;
+      if (recent && !force) return 'generating';
+      await db.query("update videos set transcript_status = 'transcribing', transcript_started_at = now() where id = $1", [v.id]);
+      v.transcript_status = 'transcribing';
+      try {
+        const { cues } = await transcriber.transcribe(video.audioUrl(v.playback_id));
+        if (!cues.length) return setStatus('unavailable');
+        await storeCues(cues, transcriber.model);
+        // Swap the video's captions for this transcript (Mux fetches it from us).
+        if (baseUrl?.startsWith('https://')) {
+          await video.replaceCaptions(v.asset_id, `${baseUrl}/api/captions/${v.id}.vtt`).catch((e) => console.warn('captions', v.id, e.message));
+        }
+        return setStatus('ready');
+      } catch (e) {
+        console.warn('transcribe', v.id, e.message);
+        await db.query("update videos set transcript_status = 'none' where id = $1 and transcript_status = 'transcribing'", [v.id]);
+        v.transcript_status = 'none';
+        if (force) throw e;
+        // Fall through to Mux's captions.
+      }
+    }
+    if (v.transcript_status === 'transcribing') return 'generating';
     if (!v.asset_id || !v.playback_id || v.has_audio === false) return v.status === 'ready' && v.has_audio === false ? setStatus('unavailable') : 'none';
     const asset = await video.getAsset(v.asset_id);
     const track = asset.textTrack;
@@ -187,18 +217,24 @@ function createStore({ db, video, ai, tint = tintFromUrl }) {
     }
     if (track.status === 'errored') return setStatus('unavailable');
     if (track.status !== 'ready') return setStatus('generating');
-    const cues = parseVtt(await video.fetchCaptions(v.playback_id, track.id));
-    await db.query('delete from transcript_cues where video_id = $1', [v.id]);
-    for (let i = 0; i < cues.length; i++) {
-      await db.query('insert into transcript_cues (video_id, idx, start_sec, end_sec, text) values ($1, $2, $3, $4, $5)', [
-        v.id,
-        i,
-        cues[i].startSec,
-        cues[i].endSec,
-        cues[i].text,
-      ]);
-    }
+    await storeCues(parseVtt(await video.fetchCaptions(v.playback_id, track.id)), 'mux');
     return setStatus('ready');
+
+    async function storeCues(cues, source) {
+      await db.query('delete from transcript_cues where video_id = $1', [v.id]);
+      for (let i = 0; i < cues.length; i++) {
+        await db.query('insert into transcript_cues (video_id, idx, start_sec, end_sec, text, speaker) values ($1, $2, $3, $4, $5, $6)', [
+          v.id,
+          i,
+          cues[i].startSec,
+          cues[i].endSec,
+          cues[i].text,
+          cues[i].speaker ?? null,
+        ]);
+      }
+      await db.query('update videos set transcript_source = $2 where id = $1', [v.id, source]);
+      v.transcript_source = source;
+    }
 
     async function setStatus(status) {
       if (status !== v.transcript_status) await db.query('update videos set transcript_status = $2 where id = $1', [v.id, status]);
@@ -229,6 +265,7 @@ function createStore({ db, video, ai, tint = tintFromUrl }) {
           ...out,
           thumbnailSec: rows[0].thumbnail_sec,
           ai: rows[0].ai || null,
+          speakers: rows[0].speakers || {},
           clips: (shorts.get(id) || []).map((s) => withHostFields(toShort(s, baseUrl), s)),
         },
         rows[0]
@@ -250,15 +287,21 @@ function createStore({ db, video, ai, tint = tintFromUrl }) {
     // first request asks the video service to start if nobody has yet.
     async transcript(episodeId) {
       const { rows } = await db.query(
-        `select v.* from episodes e join videos v on v.id = e.video_id where e.id = $1 and e.${PUBLISHED}`,
+        `select v.*, e.speakers from episodes e join videos v on v.id = e.video_id where e.id = $1 and e.${PUBLISHED}`,
         [episodeId]
       );
       const v = rows[0];
       if (!v) return null;
+      // Listeners never wait for a full transcription; that happens on publish.
       const status = await ensureTranscript(v);
       if (status !== 'ready') return { status, cues: [] };
-      const cues = await db.query('select start_sec, end_sec, text from transcript_cues where video_id = $1 order by idx', [v.id]);
-      return { status, cues: cues.rows.map((c) => ({ startSec: c.start_sec, endSec: c.end_sec, text: c.text })) };
+      const cues = await db.query('select start_sec, end_sec, text, speaker from transcript_cues where video_id = $1 order by idx', [v.id]);
+      return {
+        status,
+        source: v.transcript_source,
+        speakers: v.speakers || {},
+        cues: cues.rows.map((c) => ({ startSec: c.start_sec, endSec: c.end_sec, text: c.text, speaker: c.speaker })),
+      };
     },
 
     // Search titles, descriptions, tags and what was said.
@@ -314,9 +357,28 @@ function createStore({ db, video, ai, tint = tintFromUrl }) {
       return rows.map((r) => withHostFields(toShort(r, baseUrl), r));
     },
 
+    // Host asks to (re)make the transcript with the speech-to-text service.
+    async retranscribe(episodeId, baseUrl) {
+      if (!transcriber) throw httpError(503, 'Transcription isn’t set up on this server');
+      const { rows } = await db.query('select v.* from episodes e join videos v on v.id = e.video_id where e.id = $1', [episodeId]);
+      const v = rows[0];
+      if (!v) throw httpError(404, 'This episode has no uploaded video to transcribe');
+      await syncVideos([v.id]);
+      const fresh = (await db.query('select * from videos where id = $1', [v.id])).rows[0];
+      if (fresh.has_audio === false) throw httpError(409, 'This video has no sound to transcribe');
+      if (!fresh.audio_ready) throw httpError(409, 'The audio is still being prepared. Try again in a minute.');
+      return ensureTranscript(fresh, { thorough: true, force: true, baseUrl });
+    },
+
+    // A video's transcript as WebVTT (fetched by the video service for captions).
+    async captionsVtt(videoId) {
+      const { rows } = await db.query('select start_sec, end_sec, text from transcript_cues where video_id = $1 order by idx', [videoId]);
+      return rows.length ? cuesToVtt(rows.map((c) => ({ startSec: c.start_sec, endSec: c.end_sec, text: c.text }))) : null;
+    },
+
     // Ask the AI for suggestions from the episode's transcript and keep them
     // for the host to review. Needs the transcript, so it may ask the host to wait.
-    async generateInsights(episodeId) {
+    async generateInsights(episodeId, baseUrl) {
       if (!ai) throw httpError(503, 'AI isn’t set up on this server');
       // Bring the upload's processing state up to date first.
       const { rows: vids } = await db.query('select video_id from episodes where id = $1', [episodeId]);
@@ -327,11 +389,11 @@ function createStore({ db, video, ai, tint = tintFromUrl }) {
       );
       const v = rows[0];
       if (!v) throw httpError(404, 'This episode has no uploaded video to read');
-      const status = await ensureTranscript(v);
+      const status = await ensureTranscript(v, { thorough: true, baseUrl });
       if (status === 'unavailable') throw httpError(409, 'This episode has no spoken audio, so there’s nothing for the AI to read');
       if (status !== 'ready') throw httpError(409, 'The transcript is still being prepared. Try again in a few minutes.');
-      const { rows: cueRows } = await db.query('select start_sec, end_sec, text from transcript_cues where video_id = $1 order by idx', [v.id]);
-      const cues = cueRows.map((c) => ({ startSec: c.start_sec, endSec: c.end_sec, text: c.text }));
+      const { rows: cueRows } = await db.query('select start_sec, end_sec, text, speaker from transcript_cues where video_id = $1 order by idx', [v.id]);
+      const cues = cueRows.map((c) => ({ startSec: c.start_sec, endSec: c.end_sec, text: c.text, speaker: c.speaker }));
       const durationSec = v.video_duration_sec || cues.at(-1)?.endSec || 0;
       const raw = await ai.episodeInsights({ title: v.title, description: v.description, durationSec, cues });
       const insights = { ...cleanInsights(raw, { durationSec, cues }), model: ai.model, generatedAt: new Date().toISOString() };
@@ -365,8 +427,9 @@ function createStore({ db, video, ai, tint = tintFromUrl }) {
       return id;
     },
 
-    async updateEpisode(id, fields) {
-      return update('episodes', id, fields, {
+    // baseUrl lets publishing hand the video service a link to our captions.
+    async updateEpisode(id, fields, baseUrl) {
+      return update('episodes', id, { ...fields, baseUrl }, {
         title: 'title',
         description: 'description',
         thumbnailSec: 'thumbnail_sec',
@@ -374,6 +437,7 @@ function createStore({ db, video, ai, tint = tintFromUrl }) {
         tags: 'tags',
         summary: 'summary',
         mentions: 'mentions',
+        speakers: 'speakers',
       });
     },
 
@@ -431,7 +495,7 @@ function createStore({ db, video, ai, tint = tintFromUrl }) {
 
     const set = {};
     for (const [key, col] of Object.entries(columns)) {
-      if (fields[key] !== undefined) set[col] = key === 'chapters' || key === 'mentions' ? JSON.stringify(fields[key]) : fields[key];
+      if (fields[key] !== undefined) set[col] = key === 'chapters' || key === 'mentions' || key === 'speakers' ? JSON.stringify(fields[key]) : fields[key];
     }
     if (fields.status !== undefined) {
       set.status = fields.status;
@@ -446,7 +510,7 @@ function createStore({ db, video, ai, tint = tintFromUrl }) {
         }
         if (!row.published_at) set.published_at = new Date().toISOString();
         // Start the transcript now so it's ready (and searchable) sooner.
-        if (table === 'episodes' && v) await ensureTranscript(v).catch((e) => console.warn('transcript', v.id, e.message));
+        if (table === 'episodes' && v) await ensureTranscript(v, { thorough: true, baseUrl: fields.baseUrl }).catch((e) => console.warn('transcript', v.id, e.message));
       }
     }
     // A new cover frame means a new backdrop color.

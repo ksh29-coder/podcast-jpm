@@ -4,6 +4,7 @@ const { authMiddleware } = require('./auth');
 const { connect, migrate } = require('./db');
 const { createEngagement } = require('./engagement');
 const { openRouterAi } = require('./ai');
+const { openRouterTranscriber } = require('./transcribe');
 const { hostRouter } = require('./host');
 const { createStore } = require('./store');
 const { muxVideo } = require('./video');
@@ -13,9 +14,9 @@ const MEDIA_DIR = path.join(__dirname, '..', 'public', 'media');
 // Express 4 doesn't catch rejected promises from handlers.
 const ah = (fn) => (req, res, next) => fn(req, res, next).catch(next);
 
-function createApp({ db = connect(), video = muxVideo(), ai = openRouterAi(), tint, mediaDir = MEDIA_DIR, auth = authMiddleware(), hostPasscode } = {}) {
+function createApp({ db = connect(), video = muxVideo(), ai = openRouterAi(), transcriber = openRouterTranscriber(), tint, mediaDir = MEDIA_DIR, auth = authMiddleware(), hostPasscode } = {}) {
   const app = express();
-  const store = createStore({ db, video, ai, ...(tint && { tint }) });
+  const store = createStore({ db, video, ai, transcriber, ...(tint && { tint }) });
   const engagement = createEngagement({ db });
 
   // Tables are created (and seeded) on first use, so a fresh database needs no
@@ -89,6 +90,18 @@ function createApp({ db = connect(), video = muxVideo(), ai = openRouterAi(), ti
       const t = await store.transcript(req.params.id);
       if (!t) return res.status(404).json({ error: 'No transcript for this episode' });
       res.json(t);
+    })
+  );
+
+  // Captions for a video, as WebVTT. The video service fetches this to show
+  // our transcript as the player's subtitles.
+  app.get(
+    '/api/captions/:file',
+    ah(async (req, res) => {
+      const m = /^(vid_[0-9a-f]+)\.vtt$/.exec(req.params.file);
+      const vtt = m && (await store.captionsVtt(m[1]));
+      if (!vtt) return res.status(404).json({ error: 'No captions' });
+      res.type('text/vtt').send(vtt);
     })
   );
 

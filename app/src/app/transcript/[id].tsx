@@ -84,7 +84,14 @@ export default function TranscriptSheet() {
         renderItem={({ item, index }) => {
           const hit = q.length > 1 && item.text.toLowerCase().includes(q);
           const current = index === active;
+          // Name the speaker whenever it changes.
+          const speaker = item.speaker ?? null;
+          const showSpeaker = speaker !== null && (index === 0 || cues[index - 1].speaker !== speaker);
           return (
+            <>
+            {showSpeaker && (
+              <Text style={[type.eyebrow, styles.speaker]}>{transcript.speakers?.[speaker] ?? `Speaker ${speaker + 1}`}</Text>
+            )}
             <Pressable
               onPress={() => playFrom(item)}
               style={({ pressed }) => [styles.cue, hit && styles.hit, pressed && { opacity: 0.6 }]}
@@ -94,6 +101,7 @@ export default function TranscriptSheet() {
               <Text style={[type.caption, styles.time, current && { color: colors.highlight }]}>{formatTime(item.startSec)}</Text>
               <Text style={[styles.text, current ? styles.textNow : active >= 0 && index < active ? styles.textPast : null]}>{item.text}</Text>
             </Pressable>
+            </>
           );
         }}
       />
@@ -131,6 +139,7 @@ const styles = StyleSheet.create({
   list: { padding: spacing.xl, paddingBottom: 120, gap: spacing.xs },
   cue: { flexDirection: 'row', gap: spacing.md, paddingVertical: spacing.sm, paddingHorizontal: spacing.sm, borderRadius: radius.sm },
   hit: { backgroundColor: 'rgba(255,181,71,0.16)' },
+  speaker: { color: colors.highlight, paddingTop: spacing.md, paddingHorizontal: spacing.sm },
   time: { width: 44, paddingTop: 4, fontVariant: ['tabular-nums'] },
   text: { flex: 1, fontSize: 20, lineHeight: 28, fontWeight: '700', color: colors.textMuted },
   textNow: { color: colors.text },
