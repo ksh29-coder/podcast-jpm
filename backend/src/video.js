@@ -93,6 +93,23 @@ function muxVideo({ tokenId = process.env.MUX_TOKEN_ID, tokenSecret = process.en
       return true;
     },
 
+    // Replace the generated (Whisper) captions with our own transcript, which
+    // Mux fetches from `url`. Video players then offer the better captions.
+    async replaceCaptions(assetId, url) {
+      await call('POST', `/assets/${assetId}/tracks`, {
+        url,
+        type: 'text',
+        text_type: 'subtitles',
+        language_code: 'en',
+        name: 'English',
+        closed_captions: false,
+      });
+      const asset = await call('GET', `/assets/${assetId}`);
+      for (const t of asset.tracks || []) {
+        if (t.type === 'text' && t.text_source === 'generated_vod') await call('DELETE', `/assets/${assetId}/tracks/${t.id}`).catch(() => {});
+      }
+    },
+
     // The captions as WebVTT text.
     async fetchCaptions(playbackId, trackId) {
       const res = await fetch(`https://stream.mux.com/${playbackId}/text/${trackId}.vtt`);

@@ -86,6 +86,10 @@ alter table shorts add column if not exists tags text[] not null default '{}';
 -- view and for search. Status: none (not asked yet), generating, ready,
 -- unavailable (no sound, or the service couldn't make one).
 alter table videos add column if not exists transcript_status text not null default 'none';
+-- Which engine made the transcript: 'mux' (Whisper captions) or the model
+-- id of the speech-to-text service (better, with speakers).
+alter table videos add column if not exists transcript_source text;
+alter table videos add column if not exists transcript_started_at timestamptz;
 create table if not exists transcript_cues (
   video_id text not null references videos(id) on delete cascade,
   idx int not null,
@@ -94,6 +98,10 @@ create table if not exists transcript_cues (
   text text not null,
   primary key (video_id, idx)
 );
+-- 0, 1, 2… from speaker detection; null when unknown.
+alter table transcript_cues add column if not exists speaker int;
+-- Names for those speakers, set by a host (often from AI suggestions): {"0": "Kai"}.
+alter table episodes add column if not exists speakers jsonb not null default '{}';
 
 -- One like per person (device, until sign-in) per episode or Short.
 create table if not exists likes (

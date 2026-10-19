@@ -209,11 +209,11 @@ test('transcripts: generated captions become a searchable transcript', async () 
   assert.strictEqual((await fetch(`${base}/api/episodes/${ep.id}/transcript`)).status, 404);
   await host('PATCH', `/episodes/${ep.id}`, { status: 'published' });
 
-  assert.deepStrictEqual(await get(`/api/episodes/${ep.id}/transcript`), { status: 'generating', cues: [] });
+  assert.deepStrictEqual((await get(`/api/episodes/${ep.id}/transcript`)).status, 'generating');
   video.state.captions = 'ready';
   const t = await get(`/api/episodes/${ep.id}/transcript`);
   assert.strictEqual(t.status, 'ready');
-  assert.deepStrictEqual(t.cues[1], { startSec: 4, endSec: 9.5, text: 'Today we talk about Kubernetes operators' });
+  assert.deepStrictEqual(t.cues[1], { startSec: 4, endSec: 9.5, text: 'Today we talk about Kubernetes operators', speaker: null });
 
   const found = await get('/api/search?q=kubernetes');
   // Other published episodes share the fake transcript, so look for this one.

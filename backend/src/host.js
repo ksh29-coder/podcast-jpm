@@ -64,6 +64,19 @@ function mentions(value) {
   }));
 }
 
+// {"0": "Kai", "1": "Isabella"}: names for detected speakers.
+function speakers(value) {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw httpError(400, 'speakers must be an object like {"0": "Kai"}');
+  const out = {};
+  for (const [k, v] of Object.entries(value).slice(0, 10)) {
+    if (!/^\d+$/.test(k)) throw httpError(400, 'speaker keys are numbers');
+    const name = str(v, `speakers.${k}`, { max: 40 });
+    if (name) out[k] = name;
+  }
+  return out;
+}
+
 function chapters(value) {
   if (value === undefined) return undefined;
   if (!Array.isArray(value)) throw httpError(400, 'chapters must be a list');
@@ -139,10 +152,20 @@ function hostRouter({ store, engagement, baseUrl, passcode }) {
         tags: tags(b.tags),
         summary: b.summary === null ? null : str(b.summary, 'summary', { max: 800 }),
         mentions: mentions(b.mentions),
+        speakers: speakers(b.speakers),
         thumbnailSec: num(b.thumbnailSec, 'thumbnailSec', { min: 0 }),
         status: status(b.status),
-      });
+      }, baseUrl(req));
       if (!found) throw httpError(404, 'Episode not found');
+      res.json(await store.getEpisode(req.params.id, baseUrl(req), { host: true }));
+    })
+  );
+
+  // (Re)make the transcript with the speech-to-text service.
+  r.post(
+    '/episodes/:id/transcribe',
+    ah(async (req, res) => {
+      await store.retranscribe(req.params.id, baseUrl(req));
       res.json(await store.getEpisode(req.params.id, baseUrl(req), { host: true }));
     })
   );
@@ -151,7 +174,7 @@ function hostRouter({ store, engagement, baseUrl, passcode }) {
   r.post(
     '/episodes/:id/ai',
     ah(async (req, res) => {
-      await store.generateInsights(req.params.id);
+      await store.generateInsights(req.params.id, baseUrl(req));
       res.json(await store.getEpisode(req.params.id, baseUrl(req), { host: true }));
     })
   );

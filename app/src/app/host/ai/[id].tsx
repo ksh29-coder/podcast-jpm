@@ -62,6 +62,27 @@ export default function AiAssist() {
       )}
       {error && <Text style={ui.error}>{error}</Text>}
 
+      <Section title="Transcript">
+        <Text style={type.body}>
+          {episode.video?.transcriptStatus === 'ready'
+            ? episode.video.transcriptSource === 'mux'
+              ? 'Made from the video service’s captions (Whisper).'
+              : `Made by ${episode.video.transcriptSource ?? 'speech-to-text'}, with speakers.`
+            : episode.video?.transcriptStatus === 'unavailable'
+              ? 'No transcript: this video has no sound.'
+              : 'Not made yet.'}
+        </Text>
+        {episode.video?.transcriptStatus !== 'unavailable' && (
+          <Apply
+            label={episode.video?.transcriptStatus === 'ready' ? 'Re-transcribe' : 'Transcribe now'}
+            hint="Uses Microsoft MAI-Transcribe 2: about half the errors of the captions, with speakers. Takes a few seconds per hour of audio."
+            done={done.transcribe}
+            busy={busy === 'transcribe'}
+            onPress={() => run('transcribe', () => api.retranscribe(episode.id))}
+          />
+        )}
+      </Section>
+
       {ai && (
         <>
           <Section title="Summary">
@@ -117,6 +138,23 @@ export default function AiAssist() {
               />
             )}
           </Section>
+
+          {ai.speakers && Object.keys(ai.speakers).length > 0 && (
+            <Section title="Speakers">
+              {Object.entries(ai.speakers).map(([n, name]) => (
+                <Text key={n} style={type.body}>
+                  Speaker {Number(n) + 1} → {name}
+                </Text>
+              ))}
+              <Apply
+                label="Use these names"
+                hint="Shown in the transcript instead of “Speaker 1”, “Speaker 2”."
+                done={done.speakers || JSON.stringify(episode.speakers ?? {}) === JSON.stringify(ai.speakers)}
+                busy={busy === 'speakers'}
+                onPress={() => run('speakers', () => api.updateEpisode(episode.id, { speakers: ai.speakers }))}
+              />
+            </Section>
+          )}
 
           <Section title={`Suggested Shorts (${ai.shorts.length})`}>
             {ai.shorts.map((s, i) => (

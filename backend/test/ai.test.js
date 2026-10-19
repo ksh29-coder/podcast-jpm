@@ -21,6 +21,6 @@ test('shorts: kept to 10–90 seconds and inside the episode', () => {
 });
 
 test('rubbish replies give empty suggestions instead of failing', () => {
-  assert.deepStrictEqual(cleanInsights(null, { durationSec: 30, cues }), { summary: '', chapters: [], tags: [], mentions: [], shorts: [] });
+  assert.deepStrictEqual(cleanInsights(null, { durationSec: 30, cues }), { summary: '', chapters: [], tags: [], mentions: [], shorts: [], speakers: {} });
   assert.deepStrictEqual(cleanInsights({ chapters: 'nope', tags: [1, null] }, { durationSec: 30, cues }).tags, []);
 });

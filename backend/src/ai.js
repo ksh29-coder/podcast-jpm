@@ -10,7 +10,8 @@ function openRouterAi({ apiKey = process.env.OPENROUTER_API_KEY, model = process
     model,
     async episodeInsights({ title, description, durationSec, cues }) {
       if (!apiKey) throw Object.assign(new Error('AI isn’t set up on this server'), { status: 503 });
-      const lines = cues.map((c) => `[${Math.floor(c.startSec)}s] ${c.text}`).join('\n');
+      const hasSpeakers = cues.some((c) => Number.isInteger(c.speaker));
+      const lines = cues.map((c) => `[${Math.floor(c.startSec)}s]${Number.isInteger(c.speaker) ? ` S${c.speaker}:` : ''} ${c.text}`).join('\n');
       const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
         headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json', 'X-Title': 'AI Dev Podcast' },
@@ -31,7 +32,7 @@ function openRouterAi({ apiKey = process.env.OPENROUTER_API_KEY, model = process
               content: `Episode title: ${title}
 Description: ${description || '(none)'}
 Length: ${Math.round(durationSec)} seconds
-Transcript (each line starts with its time in seconds):
+Transcript (each line starts with its time in seconds${hasSpeakers ? ' and speaker label' : ''}):
 ${lines}
 
 Return JSON with exactly these keys:
@@ -39,6 +40,7 @@ Return JSON with exactly these keys:
 - "chapters": 3–10 chapters at real topic changes, [{"startSec": number, "title": string (max 60 chars)}], the first at 0. Fewer for very short episodes.
 - "tags": 3–8 short lowercase topic tags.
 - "mentions": tools, products, companies, people, papers or concepts that are explicitly named, [{"startSec": number, "name": string, "kind": one of ${KINDS.join(', ')}, "url": official https homepage if you are certain, else null}].
+- "speakers": ${hasSpeakers ? 'the name of each speaker label (S0, S1…) when the transcript makes it clear (for example someone says "I\'m your host, Kai"), as {"0": "Kai"}; leave out speakers you can\'t name' : '{}'}.
 - "shorts": 1–4 self-contained moments of 20–90 seconds that would work as standalone vertical clips, [{"startSec": number, "endSec": number, "title": string (max 70 chars), "why": string (one sentence)}].`,
             },
           ],
@@ -102,7 +104,16 @@ function cleanInsights(raw, { durationSec, cues }) {
     shorts.push({ startSec, endSec, title, why: str(s?.why, 200) });
   }
 
-  return { summary: str(r.summary, 800), chapters: chapters.slice(0, 12), tags, mentions: mentions.slice(0, 25), shorts: shorts.slice(0, 4) };
+  // Only names for speakers that are actually in the transcript.
+  const present = new Set(cues.map((c) => c.speaker).filter(Number.isInteger));
+  const speakers = {};
+  for (const [k, v] of Object.entries(r.speakers && typeof r.speakers === 'object' ? r.speakers : {})) {
+    const n = Number(String(k).replace(/^S/i, ''));
+    const name = str(v, 40);
+    if (present.has(n) && name) speakers[n] = name;
+  }
+
+  return { summary: str(r.summary, 800), chapters: chapters.slice(0, 12), tags, mentions: mentions.slice(0, 25), shorts: shorts.slice(0, 4), speakers };
 }
 
 module.exports = { openRouterAi, cleanInsights };

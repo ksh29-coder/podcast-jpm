@@ -8,6 +8,7 @@ export type AiSuggestions = {
   tags: string[];
   mentions: Mention[];
   shorts: { startSec: number; endSec: number; title: string; why: string }[];
+  speakers?: Record<string, string>;
   model: string;
   generatedAt: string;
 };
@@ -29,11 +30,15 @@ export type VideoState = {
   audioReady?: boolean;
   // false when the video has no sound, so the episode will be video-only.
   hasAudio?: boolean | null;
+  transcriptStatus?: string;
+  // 'mux' (Whisper captions) or the speech-to-text model that made it.
+  transcriptSource?: string | null;
   durationSec?: number | null;
 };
 
 type HostFields = { status: Status; video: VideoState | null; createdAt: string };
-export type HostEpisode = Omit<Episode, 'clips'> & HostFields & { thumbnailSec?: number; ai?: AiSuggestions | null; clips: HostShort[] };
+export type HostEpisode = Omit<Episode, 'clips'> &
+  HostFields & { thumbnailSec?: number; ai?: AiSuggestions | null; speakers?: Record<string, string>; clips: HostShort[] };
 export type HostShort = Clip & HostFields & Stats & { episodeId: string | null; episodeTitle: string | null; artworkUrl: string | null };
 
 export const MAX_SHORT_SEC = 90;
@@ -74,9 +79,20 @@ export function hostApi(passcode: string) {
     createEpisode: (body: { title: string; description: string; chapters: Chapter[]; tags: string[]; videoId: string; thumbnailSec: number }) =>
       call<HostEpisode>('POST', '/episodes', body),
     generateAi: (id: string) => call<HostEpisode>('POST', `/episodes/${id}/ai`),
+    retranscribe: (id: string) => call<HostEpisode>('POST', `/episodes/${id}/transcribe`),
     updateEpisode: (
       id: string,
-      body: Partial<{ title: string; description: string; chapters: Chapter[]; tags: string[]; thumbnailSec: number; status: Status; summary: string | null; mentions: Mention[] }>
+      body: Partial<{
+        title: string;
+        description: string;
+        chapters: Chapter[];
+        tags: string[];
+        thumbnailSec: number;
+        status: Status;
+        summary: string | null;
+        mentions: Mention[];
+        speakers: Record<string, string>;
+      }>
     ) =>
       call<HostEpisode>('PATCH', `/episodes/${id}`, body),
     shorts: () => call<HostShort[]>('GET', '/shorts'),

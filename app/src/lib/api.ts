@@ -58,10 +58,17 @@ export type Comment = {
   mine?: boolean;
 };
 
-export type Cue = { startSec: number; endSec: number; text: string };
+// speaker: 0, 1, 2… from speaker detection (null if unknown).
+export type Cue = { startSec: number; endSec: number; text: string; speaker?: number | null };
 // 'generating' while captions are made (a few minutes after publishing);
 // 'unavailable' for videos without sound.
-export type Transcript = { status: 'none' | 'generating' | 'ready' | 'unavailable'; cues: Cue[] };
+export type Transcript = {
+  status: 'none' | 'generating' | 'ready' | 'unavailable';
+  cues: Cue[];
+  // Names a host gave the speakers, e.g. { "0": "Kai" }.
+  speakers?: Record<string, string>;
+  source?: string | null;
+};
 
 // A transcript line that matched a search, linked to the moment it's said.
 export type Moment = { episodeId: string; episodeTitle: string; startSec: number; text: string };
