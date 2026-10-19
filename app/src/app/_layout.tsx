@@ -16,7 +16,12 @@ export default function RootLayout() {
         }}
       >
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="episode/[id]" options={{ title: '', headerBackTitle: 'Back' }} />
+        <Stack.Screen
+          name="episode/[id]"
+          // iOS 26 lets you swipe back from anywhere, which hijacks dragging the
+          // progress bar. Keep swipe-back to the screen edge here.
+          options={{ title: '', headerBackTitle: 'Back', fullScreenGestureEnabled: false }}
+        />
       </Stack>
     </PlayerProvider>
   );
