@@ -1,6 +1,6 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { API_URL } from '../lib/api';
-import { colors } from '../lib/theme';
+import { colors } from '../theme';
 
 export function ErrorState({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (

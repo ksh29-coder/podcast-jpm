@@ -1,5 +1,5 @@
 import { StyleSheet, Text, View } from 'react-native';
-import { colors } from '../../lib/theme';
+import { colors } from '../../theme';
 
 // "#ai #testing" chips. `light` is for text over video.
 export function Tags({ tags, light = false }: { tags: string[]; light?: boolean }) {

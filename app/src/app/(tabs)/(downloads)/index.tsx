@@ -1,14 +1,14 @@
-import Ionicons from '@expo/vector-icons/Ionicons';
 import { useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
-import { EpisodeRow } from '../../components/EpisodeRow';
-import { ErrorState } from '../../components/ErrorState';
-import { api, type Episode } from '../../lib/api';
-import { deleteDownload, downloadedSize, downloadEpisode, downloadsSupported } from '../../lib/downloads';
-import { usePlayer } from '../../lib/player';
-import { colors } from '../../lib/theme';
-import { useFetch } from '../../lib/useFetch';
+import { EpisodeRow } from '../../../components/EpisodeRow';
+import { ErrorState } from '../../../components/ErrorState';
+import { Icon } from '../../../components/Icon';
+import { api, type Episode } from '../../../lib/api';
+import { deleteDownload, downloadedSize, downloadEpisode, downloadsSupported } from '../../../lib/downloads';
+import { usePlayer } from '../../../lib/player';
+import { colors, spacing, type } from '../../../theme';
+import { useFetch } from '../../../lib/useFetch';
 
 export default function DownloadsScreen() {
   const { data, error, reload } = useFetch(api.episodes);
@@ -20,7 +20,7 @@ export default function DownloadsScreen() {
   if (!downloadsSupported) {
     return (
       <View style={styles.empty}>
-        <Ionicons name="phone-portrait-outline" size={40} color={colors.textMuted} />
+        <Icon name="phone" size={40} color={colors.textMuted} />
         <Text style={styles.emptyText}>Downloads work in the iPhone and Android app, not in the web preview.</Text>
       </View>
     );
@@ -50,7 +50,9 @@ export default function DownloadsScreen() {
       // Downloads are audio; video-only episodes have none.
       data={data.filter((ep) => ep.audioUrl)}
       keyExtractor={(ep) => ep.id}
-      contentContainerStyle={{ paddingTop: 8, paddingBottom: 24 }}
+      contentInsetAdjustmentBehavior="automatic"
+      style={{ backgroundColor: colors.bg }}
+      contentContainerStyle={{ paddingBottom: spacing.huge }}
       ListHeaderComponent={<Text style={styles.hint}>Downloaded episodes play without a connection.</Text>}
       renderItem={({ item }) => {
         const size = downloadedSize(item.id);
@@ -60,15 +62,17 @@ export default function DownloadsScreen() {
             positionSec={progress[item.id]?.positionSec}
             onPress={() => router.push(`/episode/${item.id}`)}
             right={
-              <Pressable onPress={() => toggle(item)} hitSlop={10} style={styles.action}>
+              <Pressable
+                onPress={() => toggle(item)}
+                hitSlop={10}
+                style={styles.action}
+                accessibilityRole="button"
+                accessibilityLabel={size !== null ? `Remove download of ${item.title}` : `Download ${item.title}`}
+              >
                 {busy[item.id] ? (
-                  <ActivityIndicator color={colors.accent} />
+                  <ActivityIndicator color={colors.text} />
                 ) : (
-                  <Ionicons
-                    name={size !== null ? 'checkmark-circle' : 'arrow-down-circle-outline'}
-                    size={30}
-                    color={size !== null ? colors.accent : colors.text}
-                  />
+                  <Icon name={size !== null ? 'checkCircle' : 'download'} size={28} color={size !== null ? colors.highlight : colors.text} />
                 )}
                 {size !== null && <Text style={styles.size}>{(size / 1e6).toFixed(1)} MB</Text>}
               </Pressable>
@@ -81,9 +85,9 @@ export default function DownloadsScreen() {
 }
 
 const styles = StyleSheet.create({
-  hint: { color: colors.textMuted, fontSize: 13, marginHorizontal: 16, marginBottom: 12 },
-  action: { alignItems: 'center', width: 56 },
-  size: { color: colors.textMuted, fontSize: 11, marginTop: 2 },
-  empty: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 12 },
-  emptyText: { color: colors.textMuted, fontSize: 15, textAlign: 'center' },
+  hint: { ...type.footnote, marginHorizontal: spacing.xl, marginBottom: spacing.sm },
+  action: { alignItems: 'center', width: 56, gap: spacing.xxs },
+  size: { ...type.caption, fontVariant: ['tabular-nums'] },
+  empty: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xxxl, gap: spacing.md, backgroundColor: colors.bg },
+  emptyText: { ...type.subhead, textAlign: 'center' },
 });

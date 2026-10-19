@@ -1,8 +1,8 @@
-import Ionicons from '@expo/vector-icons/Ionicons';
 import { Platform, Pressable } from 'react-native';
 import { router, Stack } from 'expo-router';
 import { HostGate } from '../../components/host/HostGate';
-import { colors } from '../../lib/theme';
+import { Icon } from '../../components/Icon';
+import { colors } from '../../theme';
 
 // Leaves host mode for the listener app.
 function exitHost() {
@@ -28,7 +28,7 @@ export default function HostLayout() {
             title: 'Host mode',
             headerLeft: () => (
               <Pressable onPress={exitHost} accessibilityLabel="Leave host mode" hitSlop={10}>
-                <Ionicons name="close" size={26} color={colors.text} />
+                <Icon name="close" size={22} />
               </Pressable>
             ),
           }}

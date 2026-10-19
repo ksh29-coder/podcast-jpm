@@ -11,7 +11,7 @@ let server;
 let base;
 
 before(async () => {
-  server = createApp({ db: new PGlite(), video: fakeVideo(), hostPasscode: PASSCODE }).listen(0);
+  server = createApp({ db: new PGlite(), video: fakeVideo(), tint: async () => '#334455', hostPasscode: PASSCODE }).listen(0);
   await new Promise((resolve) => server.once('listening', resolve));
   base = `http://127.0.0.1:${server.address().port}`;
 });

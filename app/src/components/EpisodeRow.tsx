@@ -1,7 +1,7 @@
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import type { Episode } from '../lib/api';
 import { formatDate, formatDuration } from '../lib/format';
-import { colors } from '../lib/theme';
+import { colors, radius, spacing, type } from '../theme';
 
 type Props = {
   episode: Episode;
@@ -10,21 +10,27 @@ type Props = {
   right?: React.ReactNode;
 };
 
+// One episode in a list: artwork, date and length, title, and how far you got.
+// Rows sit on the page with hairline separators rather than in cards.
 export function EpisodeRow({ episode, positionSec = 0, onPress, right }: Props) {
-  const fraction = Math.min(1, positionSec / episode.durationSec);
+  const fraction = episode.durationSec > 0 ? Math.min(1, positionSec / episode.durationSec) : 0;
+  const left = Math.max(0, episode.durationSec - positionSec);
   return (
-    <Pressable style={styles.row} onPress={onPress}>
+    <Pressable style={({ pressed }) => [styles.row, pressed && { backgroundColor: colors.card }]} onPress={onPress} accessibilityRole="button">
       <Image source={{ uri: episode.artworkUrl }} style={styles.art} />
       <View style={styles.body}>
-        <Text style={styles.meta}>
-          {formatDate(episode.publishedAt)} · {formatDuration(episode.durationSec)}
+        <Text style={type.footnote}>
+          {formatDate(episode.publishedAt)} · {fraction > 0 && fraction < 0.98 ? `${formatDuration(left)} left` : formatDuration(episode.durationSec)}
+          {!episode.audioUrl ? ' · Video' : ''}
         </Text>
-        <Text style={styles.title} numberOfLines={2}>
+        <Text style={type.headline} numberOfLines={2}>
           {episode.title}
         </Text>
-        <Text style={styles.desc} numberOfLines={2}>
-          {episode.description}
-        </Text>
+        {!!episode.description && (
+          <Text style={type.footnote} numberOfLines={2}>
+            {episode.description}
+          </Text>
+        )}
         {fraction > 0 && (
           <View style={styles.track}>
             <View style={[styles.fill, { width: `${fraction * 100}%` }]} />
@@ -39,19 +45,15 @@ export function EpisodeRow({ episode, positionSec = 0, onPress, right }: Props) 
 const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
-    gap: 14,
-    padding: 14,
-    marginHorizontal: 16,
-    marginBottom: 12,
-    borderRadius: 14,
-    backgroundColor: colors.card,
+    gap: spacing.lg,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.xl,
     alignItems: 'center',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
   },
-  art: { width: 76, height: 76, borderRadius: 10, backgroundColor: colors.cardHigh },
-  body: { flex: 1, gap: 4 },
-  meta: { color: colors.textMuted, fontSize: 12 },
-  title: { color: colors.text, fontSize: 16, fontWeight: '700' },
-  desc: { color: colors.textMuted, fontSize: 13 },
-  track: { height: 3, borderRadius: 2, backgroundColor: colors.border, marginTop: 4 },
-  fill: { height: 3, borderRadius: 2, backgroundColor: colors.accent },
+  art: { width: 72, height: 72, borderRadius: radius.md, borderCurve: 'continuous', backgroundColor: colors.cardHigh },
+  body: { flex: 1, gap: spacing.xxs },
+  track: { height: 3, borderRadius: 2, backgroundColor: colors.cardHigh, marginTop: spacing.xs, overflow: 'hidden' },
+  fill: { height: 3, backgroundColor: colors.text },
 });

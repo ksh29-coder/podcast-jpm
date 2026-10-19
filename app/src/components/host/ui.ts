@@ -1,5 +1,5 @@
 import { StyleSheet } from 'react-native';
-import { colors } from '../../lib/theme';
+import { colors } from '../../theme';
 
 // Shared styles for the host screens (forms, buttons, status chips).
 export const ui = StyleSheet.create({

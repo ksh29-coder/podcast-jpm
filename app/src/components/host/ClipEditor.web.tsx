@@ -5,7 +5,7 @@ import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from 
 import { router } from 'expo-router';
 import { formatTime } from '../../lib/format';
 import { MAX_SHORT_SEC, parseTags, type HostEpisode } from '../../lib/host';
-import { colors } from '../../lib/theme';
+import { colors } from '../../theme';
 import { useHost } from './HostGate';
 import { ui } from './ui';
 

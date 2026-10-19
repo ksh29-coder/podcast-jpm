@@ -13,7 +13,7 @@ let base;
 before(async () => {
   const mediaDir = fs.mkdtempSync(path.join(os.tmpdir(), 'media-'));
   fs.writeFileSync(path.join(mediaDir, 'ep001.mp3'), Buffer.alloc(1000, 1));
-  server = createApp({ db: new PGlite(), video: fakeVideo(), mediaDir }).listen(0);
+  server = createApp({ db: new PGlite(), video: fakeVideo(), tint: async () => '#334455', mediaDir }).listen(0);
   await new Promise((resolve) => server.once('listening', resolve));
   base = `http://127.0.0.1:${server.address().port}`;
 });

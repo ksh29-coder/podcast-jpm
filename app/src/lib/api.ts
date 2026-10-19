@@ -36,6 +36,8 @@ export type Episode = {
   videoUrl: string;
   chapters: Chapter[];
   tags: string[];
+  // Dark backdrop color taken from the artwork; null until the server has worked it out.
+  tint: string | null;
   clips: Clip[];
 } & Stats;
 

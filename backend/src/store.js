@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const { tintFromUrl } = require('./tint');
 
 // Database access and the JSON shapes the app sees. Media is either a static
 // file under /media (the seeded episodes) or a video on the video service.
@@ -27,7 +28,7 @@ const SHORT_SELECT = `
   left join episodes e on e.id = s.episode_id
   left join videos ev on ev.id = e.video_id`;
 
-function createStore({ db, video }) {
+function createStore({ db, video, tint = tintFromUrl }) {
   function episodeArtwork(row, baseUrl) {
     return row.playback_id ? video.thumbnailUrl(row.playback_id, row.thumbnail_sec) : absolutize(row.artwork_url, baseUrl);
   }
@@ -67,6 +68,7 @@ function createStore({ db, video }) {
       videoUrl: row.playback_id ? video.hlsUrl(row.playback_id) : absolutize(row.video_url, baseUrl),
       chapters: row.chapters,
       tags: row.tags || [],
+      tint: row.tint || null,
       clips: shorts.map((s) => toShort(s, baseUrl)),
     };
   }
@@ -86,6 +88,21 @@ function createStore({ db, video }) {
         : null,
       createdAt: new Date(row.created_at).toISOString(),
     };
+  }
+
+  // Work out (once) the backdrop color for episodes that don't have one yet.
+  async function fillTints(rows, baseUrl) {
+    const missing = rows.filter((r) => !r.tint);
+    await Promise.all(
+      missing.map(async (r) => {
+        const src = r.playback_id ? `https://image.mux.com/${r.playback_id}/thumbnail.jpg?time=${r.thumbnail_sec}&width=32&height=32` : absolutize(r.artwork_url, baseUrl);
+        const color = src && (await tint(src));
+        if (!color) return;
+        r.tint = color;
+        await db.query('update episodes set tint = $2 where id = $1', [r.id, color]);
+      })
+    );
+    return rows;
   }
 
   async function shortsFor(episodeIds, { publishedOnly }) {
@@ -153,6 +170,7 @@ function createStore({ db, video }) {
   return {
     async listEpisodes(baseUrl) {
       const { rows } = await db.query(`${EPISODE_SELECT} where e.${PUBLISHED} order by e.published_at desc`);
+      await fillTints(rows, baseUrl);
       const shorts = await shortsFor(rows.map((r) => r.id), { publishedOnly: true });
       return rows.map((r) => toEpisode(r, shorts.get(r.id) || [], baseUrl));
     },
@@ -160,6 +178,7 @@ function createStore({ db, video }) {
     async getEpisode(id, baseUrl, { host = false } = {}) {
       const { rows } = await db.query(`${EPISODE_SELECT} where e.id = $1 ${host ? '' : `and e.${PUBLISHED}`}`, [id]);
       if (!rows[0]) return null;
+      await fillTints(rows, baseUrl);
       const shorts = await shortsFor([id], { publishedOnly: !host });
       const out = toEpisode(rows[0], shorts.get(id) || [], baseUrl);
       if (!host) return out;
@@ -310,6 +329,8 @@ function createStore({ db, video }) {
         if (!row.published_at) set.published_at = new Date().toISOString();
       }
     }
+    // A new cover frame means a new backdrop color.
+    if (table === 'episodes' && set.thumbnail_sec !== undefined) set.tint = null;
     const keys = Object.keys(set);
     if (!keys.length) return true;
     await db.query(

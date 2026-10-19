@@ -8,10 +8,11 @@ const PASSCODE = 'test-passcode';
 let server;
 let base;
 let video;
+let tints = 0; // each computed backdrop color is different, so recomputes are visible
 
 before(async () => {
   video = fakeVideo();
-  server = createApp({ db: new PGlite(), video, hostPasscode: PASSCODE }).listen(0);
+  server = createApp({ db: new PGlite(), video, tint: async () => `#3344${String(++tints).padStart(2, '0')}`, hostPasscode: PASSCODE }).listen(0);
   await new Promise((resolve) => server.once('listening', resolve));
   base = `http://127.0.0.1:${server.address().port}`;
 });
@@ -170,4 +171,12 @@ test('a silent Short is fine, since Shorts have no audio mode', async () => {
   } finally {
     video.state.silent = false;
   }
+});
+
+test('episodes carry a backdrop color from their artwork, reset when the cover changes', async () => {
+  const first = (await get('/api/episodes/ep001')).tint;
+  assert.match(first, /^#3344\d\d$/);
+  assert.strictEqual((await get('/api/episodes/ep001')).tint, first, 'worked out once, then stored');
+  await host('PATCH', '/episodes/ep001', { thumbnailSec: 3 });
+  assert.notStrictEqual((await get('/api/episodes/ep001')).tint, first);
 });

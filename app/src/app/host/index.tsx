@@ -1,12 +1,12 @@
-import Ionicons from '@expo/vector-icons/Ionicons';
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Image, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { useHost } from '../../components/host/HostGate';
+import { Icon } from '../../components/Icon';
 import { ui } from '../../components/host/ui';
 import { formatTime } from '../../lib/format';
 import { STATUS_LABEL, videoLabel, type HostComment, type HostEpisode, type HostShort, type Status } from '../../lib/host';
-import { colors } from '../../lib/theme';
+import { colors } from '../../theme';
 
 const isWeb = Platform.OS === 'web';
 
@@ -99,14 +99,14 @@ export default function HostHome() {
               <Text style={ui.buttonText}>Upload episode</Text>
             </Pressable>
             <Pressable style={[ui.button, styles.record]} onPress={() => router.push('/host/record')}>
-              <Ionicons name="videocam" size={18} color={colors.accentText} />
+              <Icon name="video" size={18} color={colors.accentText} />
               <Text style={ui.buttonText}>Record a Short</Text>
             </Pressable>
           </>
         ) : (
           <>
             <Pressable style={[ui.button, styles.record]} onPress={() => router.push('/host/record?next=upload')}>
-              <Ionicons name="videocam" size={18} color={colors.accentText} />
+              <Icon name="video" size={18} color={colors.accentText} />
               <Text style={ui.buttonText}>Record a Short</Text>
             </Pressable>
             <Pressable style={[ui.button, ui.secondary]} onPress={() => router.push('/host/upload-short')}>
