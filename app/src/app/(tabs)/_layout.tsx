@@ -1,5 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import type { ColorValue } from 'react-native';
+import { Pressable, type ColorValue } from 'react-native';
+import { router } from 'expo-router';
 import { BottomTabBar, Tabs } from 'expo-router/js-tabs';
 import { MiniPlayer } from '../../components/MiniPlayer';
 import { colors } from '../../lib/theme';
@@ -30,7 +31,18 @@ export default function TabsLayout() {
         tabBarInactiveTintColor: colors.textMuted,
       }}
     >
-      <Tabs.Screen name="index" options={{ title: 'Episodes', tabBarIcon: icon('albums') }} />
+      <Tabs.Screen
+        name="index"
+        options={{
+          title: 'Episodes',
+          tabBarIcon: icon('albums'),
+          headerRight: () => (
+            <Pressable onPress={() => router.push('/host')} accessibilityLabel="Host mode" hitSlop={10} style={{ marginRight: 16 }}>
+              <Ionicons name="cloud-upload-outline" size={24} color={colors.text} />
+            </Pressable>
+          ),
+        }}
+      />
       <Tabs.Screen name="shorts" options={{ title: 'Shorts', headerShown: false, tabBarIcon: icon('play-circle') }} />
       <Tabs.Screen name="downloads" options={{ title: 'Downloads', tabBarIcon: icon('download') }} />
     </Tabs>

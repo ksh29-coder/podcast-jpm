@@ -87,6 +87,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         player.play();
         return;
       }
+      // Video-only episodes have nothing for the audio player to play.
+      if (!ep.audioUrl) return;
       const resumeAt = startSec ?? progress[ep.id]?.positionSec ?? 0;
       // Start over if they'd already reached the end.
       pendingSeek.current = resumeAt >= ep.durationSec - 5 ? 0 : resumeAt;

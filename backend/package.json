@@ -8,14 +8,18 @@
   },
   "scripts": {
     "test": "node --test",
-    "start": "node src/server.js",
+    "start": "node --env-file-if-exists=.env.vercel.local --env-file-if-exists=.env.local src/server.js",
     "media": "./scripts/generate-sample-media.sh"
   },
   "dependencies": {
-    "express": "^4.22.3"
+    "express": "^4.22.3",
+    "pg": "^8.23.1"
   },
   "private": "true",
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.10"
   }
 }

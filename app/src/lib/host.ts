@@ -1,0 +1,95 @@
+import { getItem, setItem } from './storage';
+import { request, type Chapter, type Clip, type Episode, type Stats } from './api';
+
+// Host mode: uploading and publishing. Unlocked with the shared host passcode
+// until company sign-in exists; the passcode is kept on the device.
+
+const KEY = 'host-passcode';
+
+export const loadPasscode = () => getItem(KEY);
+export const savePasscode = (passcode: string | null) => setItem(KEY, passcode);
+
+export type Status = 'draft' | 'in_review' | 'published' | 'rejected';
+
+export type VideoState = {
+  id: string;
+  status: 'uploading' | 'processing' | 'ready' | 'errored';
+  error: string | null;
+  audioReady?: boolean;
+  // false when the video has no sound, so the episode will be video-only.
+  hasAudio?: boolean | null;
+  durationSec?: number | null;
+};
+
+type HostFields = { status: Status; video: VideoState | null; createdAt: string };
+export type HostEpisode = Omit<Episode, 'clips'> & HostFields & { thumbnailSec?: number; clips: HostShort[] };
+export type HostShort = Clip & HostFields & Stats & { episodeId: string | null; episodeTitle: string | null; artworkUrl: string | null };
+
+export const MAX_SHORT_SEC = 90;
+
+// "#ai, testing  tools" -> ["ai", "testing", "tools"]. The server cleans up further.
+export function parseTags(text: string): string[] {
+  return text
+    .split(/[\s,]+/)
+    .map((t) => t.replace(/^#+/, '').trim())
+    .filter(Boolean);
+}
+
+export type HostComment = {
+  id: string;
+  authorName: string;
+  body: string;
+  status: 'pending' | 'approved' | 'rejected';
+  createdAt: string;
+  itemType: 'episode' | 'short';
+  itemId: string;
+  itemTitle: string | null;
+};
+
+export function hostApi(passcode: string) {
+  const call = <T>(method: string, path: string, body?: unknown) =>
+    request<T>(`/api/host${path}`, {
+      method,
+      headers: { 'X-Host-Passcode': passcode },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+
+  return {
+    session: () => call<{ ok: true }>('GET', '/session'),
+    createUpload: (kind: 'episode' | 'short') => call<{ videoId: string; uploadUrl: string }>('POST', '/uploads', { kind }),
+    video: (id: string) => call<VideoState>('GET', `/videos/${id}`),
+    episodes: () => call<HostEpisode[]>('GET', '/episodes'),
+    episode: (id: string) => call<HostEpisode>('GET', `/episodes/${id}`),
+    createEpisode: (body: { title: string; description: string; chapters: Chapter[]; tags: string[]; videoId: string; thumbnailSec: number }) =>
+      call<HostEpisode>('POST', '/episodes', body),
+    updateEpisode: (id: string, body: Partial<{ title: string; description: string; chapters: Chapter[]; tags: string[]; thumbnailSec: number; status: Status }>) =>
+      call<HostEpisode>('PATCH', `/episodes/${id}`, body),
+    shorts: () => call<HostShort[]>('GET', '/shorts'),
+    clipShort: (body: { episodeId: string; title: string; startSec: number; endSec: number; focusX: number; tags: string[] }) =>
+      call<HostShort>('POST', '/shorts', body),
+    uploadShort: (body: { videoId: string; title: string; episodeId?: string; focusX?: number; tags: string[] }) => call<HostShort>('POST', '/shorts', body),
+    updateShort: (id: string, body: Partial<{ title: string; focusX: number; tags: string[]; status: Status }>) => call<HostShort>('PATCH', `/shorts/${id}`, body),
+    comments: () => call<HostComment[]>('GET', '/comments'),
+    setCommentStatus: (id: string, status: 'approved' | 'rejected') => call<void>('PATCH', `/comments/${id}`, { status }),
+  };
+}
+
+export type HostApi = ReturnType<typeof hostApi>;
+
+export const STATUS_LABEL: Record<Status, string> = {
+  draft: 'Draft',
+  in_review: 'In review',
+  published: 'Published',
+  rejected: 'Rejected',
+};
+
+// One line on where a video has got to, for lists and upload screens.
+export function videoLabel(v: VideoState | null, { needsAudio = false } = {}) {
+  if (!v) return null;
+  if (v.status === 'errored') return `Failed: ${v.error || 'processing error'}`;
+  if (v.status === 'uploading') return 'Waiting for upload';
+  if (v.status === 'processing') return 'Processing video…';
+  if (needsAudio && !v.audioReady && v.hasAudio !== false) return 'Preparing audio…';
+  return null;
+}
+

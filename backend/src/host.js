@@ -1,0 +1,208 @@
+const crypto = require('crypto');
+const express = require('express');
+const { STATUSES } = require('./db');
+const { httpError, MAX_SHORT_SEC } = require('./store');
+
+// Host mode: uploading and publishing episodes and Shorts.
+//
+// Until SSO lands, hosts unlock it with a shared passcode (HOST_PASSCODE),
+// sent as the X-Host-Passcode header. Swap this check for a role on req.user
+// once real sign-in exists.
+function requireHost(passcode = process.env.HOST_PASSCODE) {
+  const expected = passcode && crypto.createHash('sha256').update(passcode).digest();
+  return (req, res, next) => {
+    if (!expected) return res.status(503).json({ error: 'Host mode is not set up on this server' });
+    const given = crypto.createHash('sha256').update(String(req.get('X-Host-Passcode') || '')).digest();
+    if (!crypto.timingSafeEqual(given, expected)) return res.status(401).json({ error: 'Wrong host passcode' });
+    next();
+  };
+}
+
+// Express 4 doesn't catch rejected promises from handlers.
+const ah = (fn) => (req, res, next) => fn(req, res, next).catch(next);
+
+function str(value, name, { required = false, max = 5000 } = {}) {
+  if (value === undefined && !required) return undefined;
+  if (typeof value !== 'string' || (required && !value.trim())) throw httpError(400, `${name} is required`);
+  if (value.length > max) throw httpError(400, `${name} is too long (max ${max} characters)`);
+  return value.trim();
+}
+
+function num(value, name, { required = false, min = -Infinity, max = Infinity } = {}) {
+  if (value === undefined && !required) return undefined;
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < min || value > max) {
+    throw httpError(400, `${name} must be a number${Number.isFinite(min) ? ` from ${min}` : ''}${Number.isFinite(max) ? ` to ${max}` : ''}`);
+  }
+  return value;
+}
+
+function status(value) {
+  if (value === undefined) return undefined;
+  if (!STATUSES.includes(value)) throw httpError(400, `status must be one of ${STATUSES.join(', ')}`);
+  return value;
+}
+
+// "#AI, Testing ,ai" -> ["ai", "testing"]. Up to 10 tags of 30 characters.
+function tags(value) {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.some((t) => typeof t !== 'string')) throw httpError(400, 'tags must be a list of words');
+  const clean = [...new Set(value.map((t) => t.trim().replace(/^#+/, '').toLowerCase()).filter(Boolean))];
+  if (clean.length > 10) throw httpError(400, 'Up to 10 tags');
+  if (clean.some((t) => t.length > 30)) throw httpError(400, 'Tags can be at most 30 characters');
+  return clean;
+}
+
+function chapters(value) {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) throw httpError(400, 'chapters must be a list');
+  return value.map((c, i) => ({
+    title: str(c?.title, `chapters[${i}].title`, { required: true, max: 200 }),
+    startSec: num(c?.startSec, `chapters[${i}].startSec`, { required: true, min: 0 }),
+  }));
+}
+
+function hostRouter({ store, engagement, baseUrl, passcode }) {
+  const r = express.Router();
+  r.use(requireHost(passcode));
+  const by = () => 'host';
+
+  // Lets the app check a passcode before showing host screens.
+  r.get('/session', (req, res) => res.json({ ok: true }));
+
+  // Step 1 of any upload: get a one-time URL to PUT the file to.
+  r.post(
+    '/uploads',
+    ah(async (req, res) => {
+      const kind = req.body?.kind;
+      if (!['episode', 'short'].includes(kind)) throw httpError(400, 'kind must be "episode" or "short"');
+      res.status(201).json(await store.createUpload({ kind }));
+    })
+  );
+
+  r.get(
+    '/videos/:id',
+    ah(async (req, res) => {
+      const v = await store.getVideo(req.params.id);
+      if (!v) throw httpError(404, 'Video not found');
+      res.json(v);
+    })
+  );
+
+  r.get('/episodes', ah(async (req, res) => res.json(await engagement.withStats('episode', await store.hostEpisodes(baseUrl(req)), 'host'))));
+
+  r.get(
+    '/episodes/:id',
+    ah(async (req, res) => {
+      const ep = await store.getEpisode(req.params.id, baseUrl(req), { host: true });
+      if (!ep) throw httpError(404, 'Episode not found');
+      res.json(ep);
+    })
+  );
+
+  r.post(
+    '/episodes',
+    ah(async (req, res) => {
+      const b = req.body || {};
+      const id = await store.createEpisode({
+        title: str(b.title, 'title', { required: true, max: 200 }),
+        description: str(b.description, 'description') ?? '',
+        chapters: chapters(b.chapters) ?? [],
+        tags: tags(b.tags) ?? [],
+        videoId: str(b.videoId, 'videoId', { required: true }),
+        thumbnailSec: num(b.thumbnailSec, 'thumbnailSec', { min: 0 }) ?? 0,
+        createdBy: by(req),
+      });
+      res.status(201).json(await store.getEpisode(id, baseUrl(req), { host: true }));
+    })
+  );
+
+  r.patch(
+    '/episodes/:id',
+    ah(async (req, res) => {
+      const b = req.body || {};
+      const found = await store.updateEpisode(req.params.id, {
+        title: str(b.title, 'title', { max: 200 }),
+        description: str(b.description, 'description'),
+        chapters: chapters(b.chapters),
+        tags: tags(b.tags),
+        thumbnailSec: num(b.thumbnailSec, 'thumbnailSec', { min: 0 }),
+        status: status(b.status),
+      });
+      if (!found) throw httpError(404, 'Episode not found');
+      res.json(await store.getEpisode(req.params.id, baseUrl(req), { host: true }));
+    })
+  );
+
+  r.get('/shorts', ah(async (req, res) => res.json(await engagement.withStats('short', await store.hostShorts(baseUrl(req)), 'host'))));
+
+  // Comment review queue. Nothing a viewer writes is shown until approved.
+  r.get(
+    '/comments',
+    ah(async (req, res) => res.json(await engagement.hostComments(['approved', 'rejected'].includes(req.query.status) ? req.query.status : 'pending')))
+  );
+
+  r.patch(
+    '/comments/:id',
+    ah(async (req, res) => {
+      await engagement.setCommentStatus(req.params.id, req.body?.status);
+      res.status(204).end();
+    })
+  );
+
+  // Either cut from an episode (episodeId + startSec/endSec) or an uploaded
+  // video (videoId, optionally linked to an episode).
+  r.post(
+    '/shorts',
+    ah(async (req, res) => {
+      const b = req.body || {};
+      const common = {
+        title: str(b.title, 'title', { required: true, max: 200 }),
+        focusX: num(b.focusX, 'focusX', { min: 0, max: 1 }) ?? 0.5,
+        tags: tags(b.tags) ?? [],
+        createdBy: by(req),
+      };
+      let id;
+      if (b.videoId !== undefined) {
+        id = await store.createShortFromUpload({
+          ...common,
+          videoId: str(b.videoId, 'videoId', { required: true }),
+          episodeId: str(b.episodeId, 'episodeId') ?? null,
+        });
+      } else {
+        id = await store.createShortFromEpisode(
+          {
+            ...common,
+            episodeId: str(b.episodeId, 'episodeId', { required: true }),
+            startSec: num(b.startSec, 'startSec', { required: true, min: 0 }),
+            endSec: num(b.endSec, 'endSec', { required: true, min: 0 }),
+          },
+          baseUrl(req)
+        );
+      }
+      const all = await store.hostShorts(baseUrl(req));
+      res.status(201).json(all.find((s) => s.id === id));
+    })
+  );
+
+  r.patch(
+    '/shorts/:id',
+    ah(async (req, res) => {
+      const b = req.body || {};
+      const found = await store.updateShort(req.params.id, {
+        title: str(b.title, 'title', { max: 200 }),
+        focusX: num(b.focusX, 'focusX', { min: 0, max: 1 }),
+        tags: tags(b.tags),
+        status: status(b.status),
+      });
+      if (!found) throw httpError(404, 'Short not found');
+      const all = await store.hostShorts(baseUrl(req));
+      res.json(all.find((s) => s.id === req.params.id));
+    })
+  );
+
+  r.get('/limits', (req, res) => res.json({ maxShortSec: MAX_SHORT_SEC }));
+
+  return r;
+}
+
+module.exports = { hostRouter, requireHost };

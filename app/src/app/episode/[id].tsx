@@ -2,7 +2,6 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  type GestureResponderEvent,
   Image,
   Pressable,
   ScrollView,
@@ -10,9 +9,13 @@ import {
   Text,
   View,
 } from 'react-native';
-import { useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { ErrorState } from '../../components/ErrorState';
+import { Scrubber } from '../../components/Scrubber';
+import { shareItem } from '../../components/engage/share';
+import { Tags } from '../../components/engage/Tags';
+import { useLike } from '../../components/engage/useLike';
 import { api, type Episode } from '../../lib/api';
 import { formatDate, formatTime } from '../../lib/format';
 import { usePlayer } from '../../lib/player';
@@ -33,8 +36,11 @@ export default function EpisodeScreen() {
 
 function EpisodeDetail({ episode, startAt }: { episode: Episode; startAt?: number }) {
   const player = usePlayer();
-  const [mode, setMode] = useState<'audio' | 'video'>('audio');
-  const videoStart = useRef(0);
+  // Episodes whose video has no sound have no audio version: video only.
+  const hasAudio = !!episode.audioUrl;
+  const validStart = startAt !== undefined && !Number.isNaN(startAt) ? startAt : undefined;
+  const [mode, setMode] = useState<'audio' | 'video'>(hasAudio ? 'audio' : 'video');
+  const videoStart = useRef(hasAudio ? 0 : validStart ?? 0);
   const videoTime = useRef(0);
 
   const isCurrent = player.episode?.id === episode.id;
@@ -44,10 +50,17 @@ function EpisodeDetail({ episode, startAt }: { episode: Episode; startAt?: numbe
   const currentChapter = [...episode.chapters].reverse().find((c) => c.startSec <= position);
 
   useEffect(() => {
-    if (startAt !== undefined && !Number.isNaN(startAt)) player.playEpisode(episode, startAt);
+    if (validStart !== undefined && hasAudio) player.playEpisode(episode, validStart);
     // Only on arrival from a Short.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Opening an episode counts as a view (the server counts each device once).
+  useEffect(() => {
+    api.view('episode', episode.id).catch(() => {});
+  }, [episode.id]);
+
+  const like = useLike('episode', episode.id, episode);
 
   // Audio and video share one position: switching hands it across.
   const switchMode = (next: 'audio' | 'video') => {
@@ -73,14 +86,16 @@ function EpisodeDetail({ episode, startAt }: { episode: Episode; startAt?: numbe
 
   return (
     <ScrollView contentContainerStyle={styles.page}>
-      <View style={styles.toggle}>
-        {(['audio', 'video'] as const).map((m) => (
-          <Pressable key={m} style={[styles.toggleItem, mode === m && styles.toggleActive]} onPress={() => switchMode(m)}>
-            <Ionicons name={m === 'audio' ? 'headset' : 'videocam'} size={16} color={mode === m ? colors.accentText : colors.text} />
-            <Text style={[styles.toggleText, mode === m && { color: colors.accentText }]}>{m === 'audio' ? 'Audio' : 'Video'}</Text>
-          </Pressable>
-        ))}
-      </View>
+      {hasAudio && (
+        <View style={styles.toggle}>
+          {(['audio', 'video'] as const).map((m) => (
+            <Pressable key={m} style={[styles.toggleItem, mode === m && styles.toggleActive]} onPress={() => switchMode(m)}>
+              <Ionicons name={m === 'audio' ? 'headset' : 'videocam'} size={16} color={mode === m ? colors.accentText : colors.text} />
+              <Text style={[styles.toggleText, mode === m && { color: colors.accentText }]}>{m === 'audio' ? 'Audio' : 'Video'}</Text>
+            </Pressable>
+          ))}
+        </View>
+      )}
 
       {mode === 'video' ? (
         <VideoPane uri={episode.videoUrl} startAt={videoStart.current} onTime={(s) => (videoTime.current = s)} />
@@ -91,6 +106,22 @@ function EpisodeDetail({ episode, startAt }: { episode: Episode; startAt?: numbe
       <Text style={styles.meta}>{formatDate(episode.publishedAt)}</Text>
       <Text style={styles.title}>{episode.title}</Text>
       {currentChapter && mode === 'audio' && <Text style={styles.chapterNow}>{currentChapter.title}</Text>}
+      <Tags tags={episode.tags} />
+      <View style={styles.engage}>
+        <Pressable style={styles.engageItem} onPress={like.toggle} accessibilityRole="button" accessibilityLabel={like.liked ? 'Unlike' : 'Like'}>
+          <Ionicons name={like.liked ? 'heart' : 'heart-outline'} size={22} color={like.liked ? '#ff4d6d' : colors.text} />
+          <Text style={styles.engageText}>{like.likes}</Text>
+        </Pressable>
+        <Pressable style={styles.engageItem} onPress={() => router.push(`/comments/episode/${episode.id}`)} accessibilityRole="button" accessibilityLabel="Comments">
+          <Ionicons name="chatbubble-ellipses-outline" size={21} color={colors.text} />
+          <Text style={styles.engageText}>{episode.comments}</Text>
+        </Pressable>
+        <Pressable style={styles.engageItem} onPress={() => shareItem({ title: episode.title, path: `/episode/${episode.id}` })} accessibilityRole="button" accessibilityLabel="Share">
+          <Ionicons name="arrow-redo-outline" size={21} color={colors.text} />
+          <Text style={styles.engageText}>Share</Text>
+        </Pressable>
+        <Text style={[styles.engageText, styles.views]}>{episode.views} {episode.views === 1 ? 'view' : 'views'}</Text>
+      </View>
 
       {mode === 'audio' && (
         <>
@@ -152,74 +183,6 @@ function VideoPane({ uri, startAt, onTime }: { uri: string; startAt: number; onT
   return <VideoView player={player} style={styles.video} nativeControls contentFit="contain" />;
 }
 
-// Tap or drag anywhere on the bar. While dragging, the bar and times follow
-// your finger; the seek happens when you let go.
-function Scrubber({ position, duration, onSeek }: { position: number; duration: number; onSeek: (sec: number) => void }) {
-  const [width, setWidth] = useState(0);
-  const [dragSec, setDragSec] = useState<number | null>(null);
-  // The player's position lags a seek slightly, so keep showing where you let
-  // go until it catches up.
-  const [seekingTo, setSeekingTo] = useState<number | null>(null);
-  if (seekingTo !== null && Math.abs(position - seekingTo) < 2) setSeekingTo(null);
-
-  // Give up waiting after a moment, e.g. if the seek was refused.
-  useEffect(() => {
-    if (seekingTo === null) return;
-    const t = setTimeout(() => setSeekingTo(null), 2000);
-    return () => clearTimeout(t);
-  }, [seekingTo]);
-
-  // The bar's children ignore touches, so locationX is always relative to the bar.
-  const secAt = (e: GestureResponderEvent) =>
-    width > 0 && duration > 0 ? Math.min(1, Math.max(0, e.nativeEvent.locationX / width)) * duration : 0;
-
-  const seek = (sec: number) => {
-    const clamped = Math.min(Math.max(0, sec), duration);
-    setSeekingTo(clamped);
-    onSeek(clamped);
-  };
-
-  const shown = dragSec ?? seekingTo ?? position;
-  const fraction = duration > 0 ? Math.min(1, shown / duration) : 0;
-  return (
-    <View style={styles.scrubber}>
-      <View
-        style={styles.scrubHit}
-        onLayout={(e) => setWidth(e.nativeEvent.layout.width)}
-        onStartShouldSetResponder={() => true}
-        onMoveShouldSetResponder={() => true}
-        // Keep the page from scrolling away mid-drag.
-        onResponderTerminationRequest={() => false}
-        onResponderGrant={(e) => setDragSec(secAt(e))}
-        onResponderMove={(e) => setDragSec(secAt(e))}
-        onResponderRelease={(e) => {
-          setDragSec(null);
-          seek(secAt(e));
-        }}
-        onResponderTerminate={() => setDragSec(null)}
-        accessible
-        accessibilityRole="adjustable"
-        accessibilityLabel="Playback position"
-        accessibilityValue={{ text: `${formatTime(shown)} of ${formatTime(duration)}` }}
-        accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
-        onAccessibilityAction={(e) => seek(shown + (e.nativeEvent.actionName === 'increment' ? 15 : -15))}
-      >
-        <View style={styles.scrubTrack} pointerEvents="none">
-          <View style={[styles.scrubFill, { width: `${fraction * 100}%` }]} />
-        </View>
-        <View
-          pointerEvents="none"
-          style={[styles.scrubThumb, dragSec !== null && styles.scrubThumbActive, { left: `${fraction * 100}%` }]}
-        />
-      </View>
-      <View style={styles.times}>
-        <Text style={styles.time}>{formatTime(shown)}</Text>
-        <Text style={styles.time}>-{formatTime(duration - shown)}</Text>
-      </View>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
   page: { padding: 20, paddingBottom: 48 },
   toggle: { flexDirection: 'row', alignSelf: 'center', backgroundColor: colors.card, borderRadius: 20, padding: 3, marginBottom: 16 },
@@ -230,23 +193,11 @@ const styles = StyleSheet.create({
   video: { width: '100%', aspectRatio: 16 / 9, backgroundColor: '#000', borderRadius: 12, marginBottom: 20 },
   meta: { color: colors.textMuted, fontSize: 13 },
   title: { color: colors.text, fontSize: 22, fontWeight: '800', marginTop: 4 },
+  engage: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12 },
+  engageItem: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 18, backgroundColor: colors.card },
+  engageText: { color: colors.text, fontWeight: '600', fontVariant: ['tabular-nums'] },
+  views: { color: colors.textMuted, marginLeft: 'auto' },
   chapterNow: { color: colors.accent, fontSize: 14, marginTop: 6, fontWeight: '600' },
-  // Inset so 0:00 sits clear of the iOS swipe-back edge.
-  scrubber: { marginHorizontal: 20 },
-  scrubHit: { paddingVertical: 16, marginTop: 8, justifyContent: 'center' },
-  scrubTrack: { height: 4, borderRadius: 2, backgroundColor: colors.border },
-  scrubFill: { height: 4, borderRadius: 2, backgroundColor: colors.accent },
-  scrubThumb: {
-    position: 'absolute',
-    width: 16,
-    height: 16,
-    marginLeft: -8,
-    borderRadius: 8,
-    backgroundColor: colors.accent,
-  },
-  scrubThumbActive: { width: 24, height: 24, marginLeft: -12, borderRadius: 12 },
-  times: { flexDirection: 'row', justifyContent: 'space-between' },
-  time: { color: colors.textMuted, fontSize: 12, fontVariant: ['tabular-nums'] },
   controls: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginVertical: 16 },
   playButton: { width: 68, height: 68, borderRadius: 34, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' },
   skipLabel: { color: colors.textMuted, fontSize: 10, textAlign: 'center' },

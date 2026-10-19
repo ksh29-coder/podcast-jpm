@@ -47,7 +47,8 @@ export default function DownloadsScreen() {
 
   return (
     <FlatList
-      data={data}
+      // Downloads are audio; video-only episodes have none.
+      data={data.filter((ep) => ep.audioUrl)}
       keyExtractor={(ep) => ep.id}
       contentContainerStyle={{ paddingTop: 8, paddingBottom: 24 }}
       ListHeaderComponent={<Text style={styles.hint}>Downloaded episodes play without a connection.</Text>}

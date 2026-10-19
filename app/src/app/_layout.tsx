@@ -22,6 +22,9 @@ export default function RootLayout() {
           // progress bar. Keep swipe-back to the screen edge here.
           options={{ title: '', headerBackTitle: 'Back', fullScreenGestureEnabled: false }}
         />
+        <Stack.Screen name="comments/[type]/[id]" options={{ title: 'Comments', presentation: 'modal' }} />
+        {/* Host mode has its own stack and headers (src/app/host/_layout.tsx). */}
+        <Stack.Screen name="host" options={{ headerShown: false }} />
       </Stack>
     </PlayerProvider>
   );

@@ -41,7 +41,16 @@
       ],
       "expo-status-bar",
       "expo-asset",
-      "expo-font"
+      "expo-font",
+      "expo-secure-store",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Record Shorts for the podcast.",
+          "microphonePermission": "Record sound for your Shorts.",
+          "recordAudioAndroid": true
+        }
+      ]
     ],
     "scheme": "aidevpodcast",
     "experiments": {
