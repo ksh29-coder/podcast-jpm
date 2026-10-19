@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api, type Comment, type ItemType } from '../../../lib/api';
 import { getDisplayName, saveDisplayName } from '../../../lib/device';
 import { formatDate } from '../../../lib/format';
-import { colors } from '../../../lib/theme';
+import { colors, spacing, type as text } from '../../../theme';
 import { useFetch } from '../../../lib/useFetch';
 
 // Comments on an episode or Short. New comments wait for a host to approve
@@ -50,7 +50,10 @@ export default function CommentsScreen() {
   const list = [...posted, ...(data || []).filter((c) => !posted.some((p) => p.id === c.id))];
 
   return (
-    <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={60}>
+    <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <Text style={[text.headline, styles.heading]} accessibilityRole="header">
+        Comments
+      </Text>
       {!data && !error ? (
         <ActivityIndicator style={{ flex: 1 }} color={colors.accent} />
       ) : (
@@ -122,6 +125,7 @@ export default function CommentsScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
+  heading: { textAlign: 'center', paddingTop: spacing.xl, paddingBottom: spacing.sm },
   list: { padding: 16, gap: 16, flexGrow: 1 },
   empty: { color: colors.textMuted, textAlign: 'center', marginTop: 40, paddingHorizontal: 24, lineHeight: 20 },
   comment: { gap: 4 },

@@ -1,50 +1,32 @@
-import Ionicons from '@expo/vector-icons/Ionicons';
-import { Pressable, type ColorValue } from 'react-native';
-import { router } from 'expo-router';
-import { BottomTabBar, Tabs } from 'expo-router/js-tabs';
+import { NativeTabs } from 'expo-router/unstable-native-tabs';
 import { MiniPlayer } from '../../components/MiniPlayer';
-import { colors } from '../../lib/theme';
+import { usePlayer } from '../../lib/player';
+import { colors } from '../../theme';
 
-type IconName = keyof typeof Ionicons.glyphMap;
-
-function icon(name: IconName) {
-  return ({ color, size }: { color: ColorValue; size: number }) => <Ionicons name={name} color={color as string} size={size} />;
-}
-
+// System tab bar: Liquid Glass on iOS 26, shrinking as you scroll, with the
+// now-playing bar docked above it like Apple Podcasts and Music.
 export default function TabsLayout() {
+  const { episode } = usePlayer();
   return (
-    <Tabs
-      // Now-playing bar sits just above the tabs on every tab.
-      tabBar={(props) => (
-        <>
+    <NativeTabs minimizeBehavior="onScrollDown" tintColor={colors.text} iconColor={{ default: colors.textMuted, selected: colors.text }}>
+      {episode && (
+        <NativeTabs.BottomAccessory>
           <MiniPlayer />
-          <BottomTabBar {...props} />
-        </>
+        </NativeTabs.BottomAccessory>
       )}
-      screenOptions={{
-        headerStyle: { backgroundColor: colors.bg },
-        headerTintColor: colors.text,
-        headerShadowVisible: false,
-        sceneStyle: { backgroundColor: colors.bg },
-        tabBarStyle: { backgroundColor: colors.card, borderTopColor: colors.border },
-        tabBarActiveTintColor: colors.accent,
-        tabBarInactiveTintColor: colors.textMuted,
-      }}
-    >
-      <Tabs.Screen
-        name="index"
-        options={{
-          title: 'Episodes',
-          tabBarIcon: icon('albums'),
-          headerRight: () => (
-            <Pressable onPress={() => router.push('/host')} accessibilityLabel="Host mode" hitSlop={10} style={{ marginRight: 16 }}>
-              <Ionicons name="cloud-upload-outline" size={24} color={colors.text} />
-            </Pressable>
-          ),
-        }}
-      />
-      <Tabs.Screen name="shorts" options={{ title: 'Shorts', headerShown: false, tabBarIcon: icon('play-circle') }} />
-      <Tabs.Screen name="downloads" options={{ title: 'Downloads', tabBarIcon: icon('download') }} />
-    </Tabs>
+      <NativeTabs.Trigger name="(home)" contentStyle={{ backgroundColor: colors.bg }}>
+        <NativeTabs.Trigger.Label>Episodes</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon sf={{ default: 'headphones', selected: 'headphones' }} md="podcasts" />
+      </NativeTabs.Trigger>
+      {/* Full-screen video: it sets its own insets. */}
+      <NativeTabs.Trigger name="shorts" disableAutomaticContentInsets contentStyle={{ backgroundColor: '#000' }}>
+        <NativeTabs.Trigger.Label>Shorts</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon sf={{ default: 'play.rectangle.on.rectangle', selected: 'play.rectangle.on.rectangle.fill' }} md="smart_display" />
+      </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="(downloads)" contentStyle={{ backgroundColor: colors.bg }}>
+        <NativeTabs.Trigger.Label>Downloads</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon sf={{ default: 'arrow.down.circle', selected: 'arrow.down.circle.fill' }} md="download" />
+      </NativeTabs.Trigger>
+    </NativeTabs>
   );
 }

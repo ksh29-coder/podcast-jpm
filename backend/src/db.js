@@ -72,6 +72,9 @@ create table if not exists shorts (
 );
 
 alter table episodes add column if not exists tags text[] not null default '{}';
+-- Backdrop color picked from the artwork; worked out on first read, cleared
+-- when the cover frame changes.
+alter table episodes add column if not exists tint text;
 alter table shorts add column if not exists tags text[] not null default '{}';
 
 -- One like per person (device, until sign-in) per episode or Short.

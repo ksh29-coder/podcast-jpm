@@ -12,9 +12,9 @@ const MEDIA_DIR = path.join(__dirname, '..', 'public', 'media');
 // Express 4 doesn't catch rejected promises from handlers.
 const ah = (fn) => (req, res, next) => fn(req, res, next).catch(next);
 
-function createApp({ db = connect(), video = muxVideo(), mediaDir = MEDIA_DIR, auth = authMiddleware(), hostPasscode } = {}) {
+function createApp({ db = connect(), video = muxVideo(), tint, mediaDir = MEDIA_DIR, auth = authMiddleware(), hostPasscode } = {}) {
   const app = express();
-  const store = createStore({ db, video });
+  const store = createStore({ db, video, ...(tint && { tint }) });
   const engagement = createEngagement({ db });
 
   // Tables are created (and seeded) on first use, so a fresh database needs no

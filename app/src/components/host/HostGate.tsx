@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from '
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { ApiError } from '../../lib/api';
 import { hostApi, loadPasscode, savePasscode, type HostApi } from '../../lib/host';
-import { colors } from '../../lib/theme';
+import { colors } from '../../theme';
 import { ui } from './ui';
 
 type HostContextValue = { api: HostApi; lock: () => void };

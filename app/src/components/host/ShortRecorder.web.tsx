@@ -5,7 +5,7 @@ import { router } from 'expo-router';
 import { api as publicApi, type Episode } from '../../lib/api';
 import { formatTime } from '../../lib/format';
 import { MAX_SHORT_SEC, parseTags } from '../../lib/host';
-import { colors } from '../../lib/theme';
+import { colors } from '../../theme';
 import { useHost } from './HostGate';
 import { ui } from './ui';
 import { useVideoState } from './useVideoState';

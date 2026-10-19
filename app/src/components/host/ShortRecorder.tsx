@@ -1,4 +1,3 @@
-import Ionicons from '@expo/vector-icons/Ionicons';
 import { CameraView, useCameraPermissions, useMicrophonePermissions, type CameraType } from 'expo-camera';
 import { useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -6,7 +5,8 @@ import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { formatTime } from '../../lib/format';
 import { MAX_SHORT_SEC } from '../../lib/host';
-import { colors } from '../../lib/theme';
+import { colors } from '../../theme';
+import { Icon, type IconName } from '../Icon';
 import { setRecording } from './recording';
 
 type Phase = 'idle' | 'countdown' | 'recording' | 'paused' | 'saving';
@@ -198,19 +198,19 @@ export function ShortRecorder() {
 
       {/* Side tools, like the Shorts camera. Flipping mid-recording would stop it. */}
       <View style={[styles.tools, { top: insets.top + 84 }]}>
-        <RoundButton icon="camera-reverse-outline" label="Flip camera" disabled={recordingOrPaused} onPress={() => setFacing((f) => (f === 'front' ? 'back' : 'front'))} />
-        <RoundButton icon={torch ? 'flash' : 'flash-outline'} label={torch ? 'Light off' : 'Light on'} onPress={() => setTorch((t) => !t)} />
+        <RoundButton icon="flip" label="Flip camera" disabled={recordingOrPaused} onPress={() => setFacing((f) => (f === 'front' ? 'back' : 'front'))} />
+        <RoundButton icon={torch ? 'flashOn' : 'flash'} label={torch ? 'Light off' : 'Light on'} onPress={() => setTorch((t) => !t)} />
         <RoundButton
-          icon="timer-outline"
+          icon="timer"
           label={`Timer ${timer ? `${timer} seconds` : 'off'}`}
           badge={timer ? `${timer}s` : undefined}
           disabled={phase !== 'idle'}
           onPress={() => setTimer((t) => TIMERS[(TIMERS.indexOf(t) + 1) % TIMERS.length])}
         />
-        <RoundButton icon="document-text-outline" label="Script" badge={script ? '✓' : undefined} disabled={phase !== 'idle'} onPress={() => setEditingScript(true)} />
+        <RoundButton icon="script" label="Script" badge={script ? '✓' : undefined} disabled={phase !== 'idle'} onPress={() => setEditingScript(true)} />
         {!!script && (
           <RoundButton
-            icon="speedometer-outline"
+            icon="speed"
             label={`Script speed ${speed + 1} of 3`}
             badge={`${speed + 1}`}
             onPress={() => setSpeed((s) => (s + 1) % SCROLL_SPEEDS.length)}
@@ -250,7 +250,7 @@ export function ShortRecorder() {
           </Pressable>
           {recordingOrPaused && elapsed > 1 ? (
             <Pressable onPress={finish} style={styles.done} accessibilityRole="button" accessibilityLabel="Done recording">
-              <Ionicons name="checkmark" size={30} color={colors.accentText} />
+              <Icon name="check" size={28} color={colors.accentText} />
             </Pressable>
           ) : (
             <View style={{ width: 64 }} />
@@ -287,7 +287,7 @@ function RoundButton({
   disabled,
   badge,
 }: {
-  icon: keyof typeof Ionicons.glyphMap;
+  icon: IconName;
   label: string;
   onPress: () => void;
   disabled?: boolean;
@@ -295,7 +295,7 @@ function RoundButton({
 }) {
   return (
     <Pressable onPress={onPress} disabled={disabled} style={[styles.round, disabled && { opacity: 0.35 }]} accessibilityRole="button" accessibilityLabel={label} hitSlop={6}>
-      <Ionicons name={icon} size={24} color="#fff" />
+      <Icon name={icon} size={22} color="#fff" />
       {badge && <Text style={styles.badge}>{badge}</Text>}
     </Pressable>
   );

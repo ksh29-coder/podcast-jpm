@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { StyleSheet, Text, View, type GestureResponderEvent } from 'react-native';
 import { formatTime } from '../lib/format';
-import { colors } from '../lib/theme';
+import { colors } from '../theme';
 
 type Props = {
   position: number;
@@ -93,8 +93,8 @@ export function Scrubber({ position, duration, onSeek, variant = 'default' }: Pr
 }
 
 const styles = StyleSheet.create({
-  // Inset so 0:00 sits clear of the iOS swipe-back edge.
-  wrap: { marginHorizontal: 20 },
+  // Small inset so 0:00 isn't right at the swipe-back edge.
+  wrap: { marginHorizontal: 8 },
   overlayWrap: { paddingHorizontal: 16 },
   hit: { paddingVertical: 16, marginTop: 8, justifyContent: 'center' },
   track: { height: 4, borderRadius: 2, backgroundColor: colors.border },

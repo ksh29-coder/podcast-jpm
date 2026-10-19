@@ -1,19 +1,19 @@
-import Ionicons from '@expo/vector-icons/Ionicons';
-import { useEventListener } from 'expo';
 import { useIsFocused } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, useWindowDimensions, View, type ViewToken } from 'react-native';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useVideoPlayer, VideoView } from 'expo-video';
 import { ErrorState } from '../../components/ErrorState';
+import { Glass } from '../../components/Glass';
+import { Icon, type IconName } from '../../components/Icon';
+import { ShortVideo, type ShortVideoHandle } from '../../components/ShortVideo';
 import { Scrubber } from '../../components/Scrubber';
 import { shareItem } from '../../components/engage/share';
 import { Tags } from '../../components/engage/Tags';
 import { useLike } from '../../components/engage/useLike';
 import { api, type Short } from '../../lib/api';
 import { usePlayer } from '../../lib/player';
-import { colors } from '../../lib/theme';
+import { colors, radius, spacing, type } from '../../theme';
 import { useFetch } from '../../lib/useFetch';
 
 export default function ShortsScreen() {
@@ -65,18 +65,10 @@ export default function ShortsScreen() {
 
 function ShortItem({ short, height, active, index, total }: { short: Short; height: number; active: boolean; index: number; total: number }) {
   const insets = useSafeAreaInsets();
+  const { episode: nowPlaying } = usePlayer();
   const [paused, setPaused] = useState(false);
-  const player = useVideoPlayer(short.videoUrl, (p) => {
-    p.loop = true;
-    p.timeUpdateEventInterval = 0.25;
-  });
+  const video = useRef<ShortVideoHandle>(null);
   const [time, setTime] = useState({ position: 0, duration: 0 });
-  useEventListener(player, 'timeUpdate', ({ currentTime }) => setTime({ position: currentTime, duration: player.duration }));
-
-  useEffect(() => {
-    if (active && !paused) player.play();
-    else player.pause();
-  }, [active, paused, player]);
 
   useEffect(() => {
     if (!active) setPaused(false);
@@ -101,74 +93,73 @@ function ShortItem({ short, height, active, index, total }: { short: Short; heig
       ? { position: 'absolute' as const, top: 0, height, width: videoWidth, left: -(videoWidth - width) * short.focusX }
       : StyleSheet.absoluteFill;
 
+  // The video runs under the floating iOS tab bar (and the now-playing bar
+  // above it); keep text and controls clear of both.
+  const chrome = process.env.EXPO_OS === 'ios' ? insets.bottom + 54 + (nowPlaying ? 56 : 0) : nowPlaying ? 56 : 0;
+
   return (
     <View style={{ height, overflow: 'hidden' }}>
-      <VideoView player={player} style={videoStyle} contentFit="cover" nativeControls={false} />
-      <Pressable style={StyleSheet.absoluteFill} onPress={() => setPaused((p) => !p)}>
+      <ShortVideo ref={video} uri={short.videoUrl} playing={active && !paused} style={videoStyle} focusX={short.focusX} onTime={(position, duration) => setTime({ position, duration })} />
+      {/* Fade at the bottom so white text stays readable on bright video. */}
+      <View pointerEvents="none" style={[StyleSheet.absoluteFill, { experimental_backgroundImage: 'linear-gradient(180deg, rgba(0,0,0,0) 55%, rgba(0,0,0,0.65) 100%)' }]} />
+      <Pressable style={StyleSheet.absoluteFill} onPress={() => setPaused((p) => !p)} accessibilityRole="button" accessibilityLabel={paused ? 'Play' : 'Pause'}>
         {paused && (
           <View style={styles.pausedIcon}>
-            <Ionicons name="play" size={64} color="rgba(255,255,255,0.85)" />
+            <Icon name="play" size={64} color="rgba(255,255,255,0.85)" />
           </View>
         )}
       </Pressable>
-      <Text style={[styles.counter, { top: insets.top + 12 }]}>
+      <Text style={[styles.counter, { top: insets.top + spacing.md }]}>
         {index + 1} / {total}
       </Text>
-      <View style={[styles.actions, { bottom: 140 }]}>
-        <Action icon={like.liked ? 'heart' : 'heart-outline'} color={like.liked ? '#ff4d6d' : '#fff'} label={String(like.likes)} a11y={like.liked ? 'Unlike' : 'Like'} onPress={like.toggle} />
-        <Action icon="chatbubble-ellipses-outline" label={String(short.comments)} a11y="Comments" onPress={() => router.push(`/comments/short/${short.id}`)} />
+      <View style={[styles.actions, { bottom: chrome + 128 }]}>
+        <Action icon={like.liked ? 'heartFill' : 'heart'} color={like.liked ? colors.liked : '#fff'} label={String(like.likes)} a11y={like.liked ? 'Unlike' : 'Like'} onPress={like.toggle} />
+        <Action icon="comment" label={String(short.comments)} a11y="Comments" onPress={() => router.push(`/comments/short/${short.id}`)} />
         <Action
-          icon="arrow-redo-outline"
+          icon="share"
           label="Share"
           a11y="Share"
           onPress={() => shareItem({ title: short.title, path: short.episodeId ? `/episode/${short.episodeId}` : '/shorts' })}
         />
-        <Action icon="eye-outline" label={String(short.views)} a11y={`${short.views} views`} />
+        <Action icon="eye" label={String(short.views)} a11y={`${short.views} views`} />
       </View>
-      <View style={[styles.overlay, { bottom: 56 }]} pointerEvents="box-none">
+      <View style={[styles.overlay, { bottom: chrome + 44 }]} pointerEvents="box-none">
         {short.episodeTitle && (
-          <Text style={styles.episode} numberOfLines={1}>
+          <Text style={[type.eyebrow, styles.shadowed, { color: 'rgba(255,255,255,0.8)' }]} numberOfLines={1}>
             {short.episodeTitle}
           </Text>
         )}
-        <Text style={styles.title}>{short.title}</Text>
+        <Text style={[type.title, styles.shadowed, { color: '#fff' }]}>{short.title}</Text>
         <Tags tags={short.tags} light />
         {short.episodeId && (
           <Pressable
-            style={styles.cta}
+            style={({ pressed }) => [styles.cta, pressed && { opacity: 0.8 }]}
             onPress={() => router.push(short.startSec != null ? `/episode/${short.episodeId}?t=${short.startSec}` : `/episode/${short.episodeId}`)}
+            accessibilityRole="button"
           >
-            <Ionicons name="headset" size={16} color={colors.accentText} />
-            <Text style={styles.ctaText}>{short.startSec != null ? 'Play full episode from here' : 'Play the full episode'}</Text>
+            <Icon name="headphones" size={15} color={colors.accentText} />
+            <Text style={[type.footnote, { color: colors.accentText, fontWeight: '700' }]}>
+              {short.startSec != null ? 'Play full episode from here' : 'Play the full episode'}
+            </Text>
           </Pressable>
         )}
       </View>
       {time.duration > 0 && (
-        <View style={styles.progress}>
-          <Scrubber variant="overlay" position={time.position} duration={time.duration} onSeek={(sec) => player.seekBy(sec - player.currentTime)} />
+        <View style={[styles.progress, { bottom: chrome }]}>
+          <Scrubber variant="overlay" position={time.position} duration={time.duration} onSeek={(sec) => video.current?.seekTo(sec)} />
         </View>
       )}
     </View>
   );
 }
 
-function Action({
-  icon,
-  label,
-  a11y,
-  onPress,
-  color = '#fff',
-}: {
-  icon: keyof typeof Ionicons.glyphMap;
-  label: string;
-  a11y: string;
-  onPress?: () => void;
-  color?: string;
-}) {
+function Action({ icon, label, a11y, onPress, color = '#fff' }: { icon: IconName; label: string; a11y: string; onPress?: () => void; color?: string }) {
   return (
     <Pressable style={styles.action} onPress={onPress} disabled={!onPress} accessibilityRole={onPress ? 'button' : 'text'} accessibilityLabel={a11y} hitSlop={6}>
-      <Ionicons name={icon} size={30} color={color} style={styles.actionIcon} />
-      <Text style={styles.actionLabel}>{label}</Text>
+      <Glass style={styles.actionGlass} interactive={!!onPress}>
+        <Icon name={icon} size={24} color={color} />
+      </Glass>
+      <Text style={[styles.actionLabel, styles.shadowed]}>{label}</Text>
     </Pressable>
   );
 }
@@ -182,26 +173,24 @@ function parseAspect(ratio: string | null) {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#000' },
   pausedIcon: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  counter: { position: 'absolute', right: 16, color: '#fff', fontSize: 13, opacity: 0.8 },
+  counter: { position: 'absolute', right: spacing.lg, ...type.caption, color: 'rgba(255,255,255,0.8)', fontVariant: ['tabular-nums'] },
   // Leaves room on the right for the like/comment/share column.
-  overlay: { position: 'absolute', left: 16, right: 72, gap: 6 },
-  actions: { position: 'absolute', right: 10, alignItems: 'center', gap: 18 },
-  action: { alignItems: 'center', gap: 2, minWidth: 48 },
-  actionIcon: { textShadowColor: 'rgba(0,0,0,0.5)', textShadowRadius: 6 },
-  actionLabel: { color: '#fff', fontSize: 12, fontWeight: '700', textShadowColor: 'rgba(0,0,0,0.6)', textShadowRadius: 4 },
-  progress: { position: 'absolute', left: 0, right: 0, bottom: 0 },
-  episode: { color: 'rgba(255,255,255,0.8)', fontSize: 13, fontWeight: '600' },
-  title: { color: '#fff', fontSize: 20, fontWeight: '800', textShadowColor: 'rgba(0,0,0,0.6)', textShadowRadius: 6 },
+  overlay: { position: 'absolute', left: spacing.lg, right: 76, gap: spacing.sm },
+  actions: { position: 'absolute', right: spacing.md, alignItems: 'center', gap: spacing.lg },
+  action: { alignItems: 'center', gap: spacing.xs, minWidth: 48 },
+  actionGlass: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center' },
+  actionLabel: { ...type.caption, color: '#fff', fontWeight: '700', fontVariant: ['tabular-nums'] },
+  shadowed: { textShadowColor: 'rgba(0,0,0,0.55)', textShadowRadius: 6 },
+  progress: { position: 'absolute', left: 0, right: 0 },
   cta: {
     flexDirection: 'row',
     alignItems: 'center',
     alignSelf: 'flex-start',
-    gap: 6,
-    marginTop: 6,
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-    borderRadius: 20,
+    gap: spacing.xs + 2,
+    marginTop: spacing.xs,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm + 1,
+    borderRadius: radius.full,
     backgroundColor: colors.accent,
   },
-  ctaText: { color: colors.accentText, fontWeight: '700' },
 });
