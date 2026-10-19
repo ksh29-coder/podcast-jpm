@@ -32,6 +32,17 @@ const ICONS = {
   phone: { sf: 'iphone', ion: 'phone-portrait-outline' },
   chevronDown: { sf: 'chevron.down', ion: 'chevron-down' },
   list: { sf: 'list.bullet', ion: 'list' },
+  back10: { sf: 'gobackward.10', ion: 'play-back' },
+  back30: { sf: 'gobackward.30', ion: 'play-back' },
+  forward15: { sf: 'goforward.15', ion: 'play-forward' },
+  forward45: { sf: 'goforward.45', ion: 'play-forward' },
+  forward60: { sf: 'goforward.60', ion: 'play-forward' },
+  moon: { sf: 'moon.zzz', ion: 'moon-outline' },
+  moonFill: { sf: 'moon.zzz.fill', ion: 'moon' },
+  transcript: { sf: 'quote.bubble', ion: 'reader-outline' },
+  search: { sf: 'magnifyingglass', ion: 'search' },
+  minus: { sf: 'minus', ion: 'remove' },
+  plus: { sf: 'plus', ion: 'add' },
 } as const satisfies Record<string, { sf: SFSymbol; ion: keyof typeof Ionicons.glyphMap }>;
 
 export type IconName = keyof typeof ICONS;
@@ -41,4 +52,10 @@ export function Icon({ name, size = 22, color = colors.text }: { name: IconName;
   const fallback = <Ionicons name={icon.ion} size={size} color={color as string} />;
   if (process.env.EXPO_OS !== 'ios') return fallback;
   return <SymbolView name={icon.sf} size={size} tintColor={color} weight="semibold" fallback={fallback} />;
+}
+
+// The skip button icon for a skip length (only lengths with a matching symbol are offered).
+export function skipIcon(dir: 'back' | 'forward', seconds: number): IconName {
+  const name = `${dir}${seconds}`;
+  return (name in ICONS ? name : dir === 'back' ? 'back15' : 'forward30') as IconName;
 }

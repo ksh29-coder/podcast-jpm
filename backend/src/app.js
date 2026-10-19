@@ -54,7 +54,7 @@ function createApp({ db = connect(), video = muxVideo(), tint, mediaDir = MEDIA_
     res.json({
       service: 'AI Dev Podcast backend',
       ok: true,
-      endpoints: ['/api/episodes', '/api/episodes/:id', '/api/shorts', '/api/progress', '/api/items/*', '/api/host/*', '/media/*'],
+      endpoints: ['/api/episodes', '/api/episodes/:id', '/api/episodes/:id/transcript', '/api/search?q=', '/api/shorts', '/api/progress', '/api/items/*', '/api/host/*', '/media/*'],
     });
   });
 
@@ -79,6 +79,29 @@ function createApp({ db = connect(), video = muxVideo(), tint, mediaDir = MEDIA_
       const ep = await store.getEpisode(req.params.id, baseUrl(req));
       if (!ep) return res.status(404).json({ error: 'Episode not found' });
       res.json((await engagement.withStats('episode', [ep], req.user.id))[0]);
+    })
+  );
+
+  app.get(
+    '/api/episodes/:id/transcript',
+    ah(async (req, res) => {
+      const t = await store.transcript(req.params.id);
+      if (!t) return res.status(404).json({ error: 'No transcript for this episode' });
+      res.json(t);
+    })
+  );
+
+  app.get(
+    '/api/search',
+    ah(async (req, res) => {
+      const q = String(req.query.q || '').trim();
+      if (q.length < 2) return res.json({ episodes: [], shorts: [], moments: [] });
+      const results = await store.search(q.slice(0, 100), baseUrl(req));
+      res.json({
+        ...results,
+        episodes: await engagement.withStats('episode', results.episodes, req.user.id),
+        shorts: await engagement.withStats('short', results.shorts, req.user.id),
+      });
     })
   );
 

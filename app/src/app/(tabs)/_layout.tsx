@@ -27,6 +27,11 @@ export default function TabsLayout() {
         <NativeTabs.Trigger.Label>Downloads</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon sf={{ default: 'arrow.down.circle', selected: 'arrow.down.circle.fill' }} md="download" />
       </NativeTabs.Trigger>
+      {/* iOS 26 shows this as the separate search button at the end of the tab bar. */}
+      <NativeTabs.Trigger name="search" role="search" contentStyle={{ backgroundColor: colors.bg }}>
+        <NativeTabs.Trigger.Label>Search</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon sf="magnifyingglass" md="search" />
+      </NativeTabs.Trigger>
     </NativeTabs>
   );
 }

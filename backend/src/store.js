@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const { tintFromUrl } = require('./tint');
+const { parseVtt } = require('./vtt');
 
 // Database access and the JSON shapes the app sees. Media is either a static
 // file under /media (the seeded episodes) or a video on the video service.
@@ -165,6 +166,43 @@ function createStore({ db, video, tint = tintFromUrl }) {
     await Promise.all(rows.map((r) => syncVideo(r).catch((e) => console.warn('video sync', r.id, e.message))));
   }
 
+  // Moves a video's transcript along: asks for captions if nobody has, and
+  // stores them once they're ready. Returns the transcript status.
+  async function ensureTranscript(v) {
+    if (v.transcript_status === 'ready' || v.transcript_status === 'unavailable') return v.transcript_status;
+    if (!v.asset_id || !v.playback_id || v.has_audio === false) return v.status === 'ready' && v.has_audio === false ? setStatus('unavailable') : 'none';
+    const asset = await video.getAsset(v.asset_id);
+    const track = asset.textTrack;
+    if (!track) {
+      if (!asset.hasAudioTrack) return setStatus('unavailable');
+      if (v.transcript_status === 'none' && asset.status === 'ready') {
+        await video.generateSubtitles(v.asset_id);
+        return setStatus('generating');
+      }
+      return v.transcript_status;
+    }
+    if (track.status === 'errored') return setStatus('unavailable');
+    if (track.status !== 'ready') return setStatus('generating');
+    const cues = parseVtt(await video.fetchCaptions(v.playback_id, track.id));
+    await db.query('delete from transcript_cues where video_id = $1', [v.id]);
+    for (let i = 0; i < cues.length; i++) {
+      await db.query('insert into transcript_cues (video_id, idx, start_sec, end_sec, text) values ($1, $2, $3, $4, $5)', [
+        v.id,
+        i,
+        cues[i].startSec,
+        cues[i].endSec,
+        cues[i].text,
+      ]);
+    }
+    return setStatus('ready');
+
+    async function setStatus(status) {
+      if (status !== v.transcript_status) await db.query('update videos set transcript_status = $2 where id = $1', [v.id, status]);
+      v.transcript_status = status;
+      return status;
+    }
+  }
+
   const PUBLISHED = "status = 'published'";
 
   return {
@@ -196,6 +234,51 @@ function createStore({ db, video, tint = tintFromUrl }) {
     async episodeDuration(id) {
       const ep = await this.getEpisode(id, '');
       return ep && ep.durationSec;
+    },
+
+    // The transcript of a published episode, from its generated captions.
+    // Captions take a few minutes; until then the status says so, and the
+    // first request asks the video service to start if nobody has yet.
+    async transcript(episodeId) {
+      const { rows } = await db.query(
+        `select v.* from episodes e join videos v on v.id = e.video_id where e.id = $1 and e.${PUBLISHED}`,
+        [episodeId]
+      );
+      const v = rows[0];
+      if (!v) return null;
+      const status = await ensureTranscript(v);
+      if (status !== 'ready') return { status, cues: [] };
+      const cues = await db.query('select start_sec, end_sec, text from transcript_cues where video_id = $1 order by idx', [v.id]);
+      return { status, cues: cues.rows.map((c) => ({ startSec: c.start_sec, endSec: c.end_sec, text: c.text })) };
+    },
+
+    // Search titles, descriptions, tags and what was said.
+    async search(q, baseUrl) {
+      const like = `%${q.replace(/[\\%_]/g, (c) => '\\' + c)}%`;
+      const eps = await db.query(
+        `${EPISODE_SELECT} where e.${PUBLISHED} and (e.title ilike $1 or e.description ilike $1 or exists (select 1 from unnest(e.tags) t where t ilike $1))
+         order by e.published_at desc limit 20`,
+        [like]
+      );
+      const shorts = await db.query(
+        `${SHORT_SELECT} where s.${PUBLISHED} and (s.title ilike $1 or exists (select 1 from unnest(s.tags) t where t ilike $1))
+         order by s.published_at desc limit 20`,
+        [like]
+      );
+      // Moments: transcript lines that mention it, linked to the second they're said.
+      const moments = await db.query(
+        `select e.id as episode_id, e.title as episode_title, c.start_sec, c.text
+         from transcript_cues c join episodes e on e.video_id = c.video_id
+         where e.${PUBLISHED} and c.text ilike $1
+         order by e.published_at desc, c.idx limit 30`,
+        [like]
+      );
+      await fillTints(eps.rows, baseUrl);
+      return {
+        episodes: eps.rows.map((r) => toEpisode(r, [], baseUrl)),
+        shorts: shorts.rows.map((r) => toShort(r, baseUrl)),
+        moments: moments.rows.map((m) => ({ episodeId: m.episode_id, episodeTitle: m.episode_title, startSec: m.start_sec, text: m.text })),
+      };
     },
 
     // ---- Host side ----
@@ -327,6 +410,8 @@ function createStore({ db, video, tint = tintFromUrl }) {
           throw httpError(400, `A Short can be at most ${MAX_SHORT_SEC} seconds`);
         }
         if (!row.published_at) set.published_at = new Date().toISOString();
+        // Start the transcript now so it's ready (and searchable) sooner.
+        if (table === 'episodes' && v) await ensureTranscript(v).catch((e) => console.warn('transcript', v.id, e.message));
       }
     }
     // A new cover frame means a new backdrop color.

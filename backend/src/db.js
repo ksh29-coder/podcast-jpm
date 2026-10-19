@@ -77,6 +77,19 @@ alter table episodes add column if not exists tags text[] not null default '{}';
 alter table episodes add column if not exists tint text;
 alter table shorts add column if not exists tags text[] not null default '{}';
 
+-- Transcript: generated captions, stored line by line for the follow-along
+-- view and for search. Status: none (not asked yet), generating, ready,
+-- unavailable (no sound, or the service couldn't make one).
+alter table videos add column if not exists transcript_status text not null default 'none';
+create table if not exists transcript_cues (
+  video_id text not null references videos(id) on delete cascade,
+  idx int not null,
+  start_sec double precision not null,
+  end_sec double precision not null,
+  text text not null,
+  primary key (video_id, idx)
+);
+
 -- One like per person (device, until sign-in) per episode or Short.
 create table if not exists likes (
   item_type text not null check (item_type in ('episode', 'short')),

@@ -2,8 +2,19 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import { setAudioModeAsync, useAudioPlayer, useAudioPlayerStatus, type AudioStatus } from 'expo-audio';
 import { api, type Episode, type Progress } from './api';
 import { localAudioUri } from './downloads';
+import { getItem, setItem } from './storage';
 
 const SAVE_EVERY_SEC = 10;
+
+// Listening preferences, kept on the device and applied to every episode.
+export type PlaybackPrefs = { rate: number; skipBack: number; skipForward: number };
+const DEFAULT_PREFS: PlaybackPrefs = { rate: 1, skipBack: 15, skipForward: 30 };
+// expo-audio plays at most 2× on phones.
+export const MIN_RATE = 0.5;
+export const MAX_RATE = 2;
+
+// Sleep timer: pause after some minutes, or when the current chapter ends.
+export type Sleep = { kind: 'time'; endsAt: number } | { kind: 'chapter'; atSec: number; title: string } | null;
 
 type PlayerContextValue = {
   episode: Episode | null;
@@ -15,6 +26,13 @@ type PlayerContextValue = {
   seekTo: (sec: number) => void;
   seekBy: (deltaSec: number) => void;
   setRate: (rate: number) => void;
+  prefs: PlaybackPrefs;
+  setSkip: (back: number, forward: number) => void;
+  sleep: Sleep;
+  // Seconds until a timed sleep pauses playback (null when not timed).
+  sleepLeftSec: number | null;
+  // Minutes, 'chapter' for the end of the current chapter, or null to cancel.
+  setSleep: (option: number | 'chapter' | null) => void;
 };
 
 const PlayerContext = createContext<PlayerContextValue | null>(null);
@@ -29,6 +47,55 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const pendingSeek = useRef<number | null>(null);
   const seekAttempts = useRef(0);
   const lastSaved = useRef(0);
+  const [prefs, setPrefs] = useState<PlaybackPrefs>(DEFAULT_PREFS);
+  const [sleep, setSleepState] = useState<Sleep>(null);
+  const [sleepLeftSec, setSleepLeftSec] = useState<number | null>(null);
+  const statusRef = useRef(status);
+
+  useEffect(() => {
+    statusRef.current = status;
+  });
+
+  useEffect(() => {
+    getItem('playback-prefs').then((saved) => {
+      if (!saved) return;
+      try {
+        setPrefs({ ...DEFAULT_PREFS, ...JSON.parse(saved) });
+      } catch {
+        // Unreadable: keep the defaults.
+      }
+    });
+  }, []);
+
+  const updatePrefs = useCallback((patch: Partial<PlaybackPrefs>) => {
+    setPrefs((p) => {
+      const next = { ...p, ...patch };
+      setItem('playback-prefs', JSON.stringify(next));
+      return next;
+    });
+  }, []);
+
+  // Each new episode starts at normal speed in expo-audio; bring it back to
+  // the chosen speed once it has loaded.
+  useEffect(() => {
+    if (status.isLoaded && Math.abs(status.playbackRate - prefs.rate) > 0.01) player.setPlaybackRate(prefs.rate);
+  }, [status.isLoaded, status.playbackRate, prefs.rate, player]);
+
+  // While a sleep timer is set, check once a second whether it's time to pause.
+  useEffect(() => {
+    if (!sleep) return;
+    const tick = () => {
+      const s = statusRef.current;
+      if (sleep.kind === 'time') setSleepLeftSec(Math.max(0, Math.round((sleep.endsAt - Date.now()) / 1000)));
+      const due = sleep.kind === 'time' ? Date.now() >= sleep.endsAt : s.currentTime >= sleep.atSec;
+      if (!due) return;
+      player.pause();
+      setSleepState(null);
+      setSleepLeftSec(null);
+    };
+    const t = setInterval(tick, 1000);
+    return () => clearInterval(t);
+  }, [sleep, player]);
 
   useEffect(() => {
     setAudioModeAsync({
@@ -116,7 +183,27 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     seekTo: (sec) => player.seekTo(sec),
     seekBy: (delta) =>
       player.seekTo(Math.min(Math.max(0, status.currentTime + delta), status.duration || Infinity)),
-    setRate: (rate) => player.setPlaybackRate(rate),
+    setRate: (rate) => {
+      const r = Math.round(Math.min(MAX_RATE, Math.max(MIN_RATE, rate)) * 100) / 100;
+      updatePrefs({ rate: r });
+      player.setPlaybackRate(r);
+    },
+    prefs,
+    setSkip: (back, forward) => updatePrefs({ skipBack: back, skipForward: forward }),
+    sleep,
+    sleepLeftSec: sleep?.kind === 'time' ? sleepLeftSec : null,
+    setSleep: (option) => {
+      setSleepLeftSec(typeof option === 'number' ? option * 60 : null);
+      if (option === null) return setSleepState(null);
+      if (option === 'chapter') {
+        const t = status.currentTime;
+        const next = episode?.chapters.find((c) => c.startSec > t + 1);
+        const current = [...(episode?.chapters ?? [])].reverse().find((c) => c.startSec <= t);
+        // No later chapter: stop at the end of the episode.
+        return setSleepState({ kind: 'chapter', atSec: next ? next.startSec : status.duration - 0.5, title: current?.title ?? 'this chapter' });
+      }
+      setSleepState({ kind: 'time', endsAt: Date.now() + option * 60_000 });
+    },
   };
 
   return <PlayerContext.Provider value={value}>{children}</PlayerContext.Provider>;
