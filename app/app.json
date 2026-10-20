@@ -8,7 +8,10 @@
     "userInterfaceStyle": "dark",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.ksh29.aidevwave"
+      "bundleIdentifier": "com.ksh29.aidevwave",
+      "config": {
+        "usesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -35,7 +38,7 @@
       [
         "expo-audio",
         {
-          "microphonePermission": false,
+          "microphonePermission": "Record sound for your Shorts.",
           "enableBackgroundPlayback": true
         }
       ],
@@ -50,6 +53,12 @@
       "expo-asset",
       "expo-font",
       "expo-secure-store",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Choose a video from your library to upload as a Short."
+        }
+      ],
       [
         "expo-camera",
         {
