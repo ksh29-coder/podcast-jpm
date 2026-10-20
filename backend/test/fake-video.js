@@ -54,7 +54,7 @@ function fakeVideo() {
     },
     hlsUrl: (p) => `https://stream.test/${p}.m3u8`,
     audioUrl: (p) => `https://stream.test/${p}/audio.m4a`,
-    thumbnailUrl: (p, t = 0) => `https://image.test/${p}.jpg?time=${t}`,
+    thumbnailUrl: (p, t = 0, size = 800) => `https://image.test/${p}.jpg?time=${t}${size === 800 ? '' : `&size=${size}`}`,
   };
 }
 

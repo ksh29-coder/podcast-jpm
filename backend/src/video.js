@@ -3,11 +3,51 @@
 // (e.g. inside JPM) means rewriting this file and nothing else.
 //
 // Currently Mux: https://www.mux.com/docs/api-reference
+//
+// Private playback (MUX_SIGNED=true): new videos get a signed playback id and
+// every link carries a short-lived token, so a copied link stops working.
+// Needs a signing key (MUX_SIGNING_KEY_ID, and MUX_SIGNING_KEY as Mux gives it:
+// base64 of the PEM). Videos made before switching on stay public. Mux rejects
+// a token on a public id, so signed ids are stored as "s:<id>" to tell them apart.
+// https://www.mux.com/docs/guides/secure-video-playback
+
+const crypto = require('crypto');
 
 const API = 'https://api.mux.com/video/v1';
+const SIGNED = 's:';
+// Links in API responses stay valid this long; apps refetch well within it.
+const TOKEN_HOURS = 12;
 
-function muxVideo({ tokenId = process.env.MUX_TOKEN_ID, tokenSecret = process.env.MUX_TOKEN_SECRET } = {}) {
+function muxVideo({
+  tokenId = process.env.MUX_TOKEN_ID,
+  tokenSecret = process.env.MUX_TOKEN_SECRET,
+  signed = process.env.MUX_SIGNED === 'true',
+  signingKeyId = process.env.MUX_SIGNING_KEY_ID,
+  signingKey = process.env.MUX_SIGNING_KEY,
+  now = Date.now,
+} = {}) {
   const auth = 'Basic ' + Buffer.from(`${tokenId}:${tokenSecret}`).toString('base64');
+  if (signed && !(signingKeyId && signingKey)) throw new Error('MUX_SIGNED needs MUX_SIGNING_KEY_ID and MUX_SIGNING_KEY');
+  const privateKey = signingKey ? crypto.createPrivateKey(Buffer.from(signingKey, 'base64').toString('utf8')) : null;
+  const policy = signed ? 'signed' : 'public';
+
+  // RS256 JWT. aud: v = video, audio and captions; t = thumbnail.
+  function token(id, aud, claims) {
+    if (!privateKey) throw Object.assign(new Error('This video is private but no signing key is configured'), { status: 503 });
+    const part = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
+    const body = `${part({ alg: 'RS256', typ: 'JWT', kid: signingKeyId })}.${part({ sub: id, aud, exp: Math.floor(now() / 1000) + TOKEN_HOURS * 3600, ...claims })}`;
+    return `${body}.${crypto.sign('RSA-SHA256', Buffer.from(body), privateKey).toString('base64url')}`;
+  }
+
+  // A link to a playback id's file. Signed ids put the options in the token,
+  // since Mux allows nothing else in the query string.
+  function link(ref, base, path, aud, options) {
+    if (ref.startsWith(SIGNED)) {
+      const id = ref.slice(SIGNED.length);
+      return `${base}/${id}${path}?token=${token(id, aud, options)}`;
+    }
+    return `${base}/${ref}${path}${options ? `?${new URLSearchParams(options)}` : ''}`;
+  }
 
   async function call(method, path, body) {
     if (!tokenId || !tokenSecret) throw Object.assign(new Error('Video service is not configured'), { status: 503 });
@@ -34,7 +74,7 @@ function muxVideo({ tokenId = process.env.MUX_TOKEN_ID, tokenSecret = process.en
       const data = await call('POST', '/uploads', {
         cors_origin: process.env.UPLOAD_CORS_ORIGIN || '*',
         new_asset_settings: {
-          playback_policies: ['public'],
+          playback_policies: [policy],
           video_quality: 'basic',
           // Speech-to-text captions; they double as the transcript.
           inputs: [{ generated_subtitles: [{ language_code: 'en', name: 'English (generated)' }] }],
@@ -56,7 +96,7 @@ function muxVideo({ tokenId = process.env.MUX_TOKEN_ID, tokenSecret = process.en
     async createClip({ assetId, sourceUrl, startSec, endSec }) {
       const data = await call('POST', '/assets', {
         inputs: [{ url: assetId ? `mux://assets/${assetId}` : sourceUrl, start_time: startSec, end_time: endSec }],
-        playback_policies: ['public'],
+        playback_policies: [policy],
         video_quality: 'basic',
       });
       return { assetId: data.id };
@@ -69,7 +109,7 @@ function muxVideo({ tokenId = process.env.MUX_TOKEN_ID, tokenSecret = process.en
       const text = (data.tracks || []).find((t) => t.type === 'text' && t.text_source === 'generated_vod');
       return {
         status,
-        playbackId: data.playback_ids?.find((p) => p.policy === 'public')?.id || null,
+        playbackId: playbackRef(data.playback_ids),
         durationSec: data.duration ?? null,
         aspectRatio: data.aspect_ratio || null,
         audioReady: audio?.status === 'ready',
@@ -112,16 +152,22 @@ function muxVideo({ tokenId = process.env.MUX_TOKEN_ID, tokenSecret = process.en
 
     // The captions as WebVTT text.
     async fetchCaptions(playbackId, trackId) {
-      const res = await fetch(`https://stream.mux.com/${playbackId}/text/${trackId}.vtt`);
+      const res = await fetch(link(playbackId, 'https://stream.mux.com', `/text/${trackId}.vtt`, 'v'));
       if (!res.ok) throw Object.assign(new Error(`Captions download failed: ${res.status}`), { status: 502 });
       return res.text();
     },
 
-    hlsUrl: (playbackId) => `https://stream.mux.com/${playbackId}.m3u8`,
-    audioUrl: (playbackId) => `https://stream.mux.com/${playbackId}/audio.m4a`,
-    thumbnailUrl: (playbackId, timeSec = 0) =>
-      `https://image.mux.com/${playbackId}/thumbnail.jpg?time=${timeSec}&width=800&height=800&fit_mode=smartcrop`,
+    hlsUrl: (playbackId) => link(playbackId, 'https://stream.mux.com', '.m3u8', 'v'),
+    audioUrl: (playbackId) => link(playbackId, 'https://stream.mux.com', '/audio.m4a', 'v'),
+    thumbnailUrl: (playbackId, timeSec = 0, size = 800) =>
+      link(playbackId, 'https://image.mux.com', '/thumbnail.jpg', 't', { time: timeSec, width: size, height: size, fit_mode: 'smartcrop' }),
   };
+}
+
+// Our reference for an asset's playback id: a signed one if it has one.
+function playbackRef(ids = []) {
+  const signedId = ids.find((p) => p.policy === 'signed')?.id;
+  return signedId ? SIGNED + signedId : ids.find((p) => p.policy === 'public')?.id || null;
 }
 
 module.exports = { muxVideo };
