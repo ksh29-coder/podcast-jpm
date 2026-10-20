@@ -14,7 +14,7 @@ function openRouterAi({ apiKey = process.env.OPENROUTER_API_KEY, model = process
       const lines = cues.map((c) => `[${Math.floor(c.startSec)}s]${Number.isInteger(c.speaker) ? ` S${c.speaker}:` : ''} ${c.text}`).join('\n');
       const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json', 'X-Title': 'AI Dev Podcast' },
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json', 'X-Title': 'AI Dev Wave' },
         body: JSON.stringify({
           model,
           response_format: { type: 'json_object' },

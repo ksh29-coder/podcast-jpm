@@ -1,4 +1,4 @@
-# AI Dev Podcast app
+# AI Dev Wave app
 
 Expo (React Native) app for iPhone and Android: build step 2–4 of the project brief.
 
