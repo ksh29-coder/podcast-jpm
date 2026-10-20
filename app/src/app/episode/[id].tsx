@@ -40,7 +40,8 @@ function NowPlaying({ episode, startAt, startInVideo }: { episode: Episode; star
   const currentChapter = [...episode.chapters].reverse().find((c) => c.startSec <= position);
 
   const [mode, setMode] = useState<'audio' | 'video'>(!hasAudio || startInVideo ? 'video' : 'audio');
-  const videoStart = useRef(validStart ?? (startInVideo ? position : 0));
+  // Where the video starts; `n` remounts the player to start somewhere new.
+  const [videoStart, setVideoStart] = useState({ sec: validStart ?? (startInVideo ? position : 0), n: 0 });
   const videoTime = useRef(0);
 
   useEffect(() => {
@@ -61,7 +62,7 @@ function NowPlaying({ episode, startAt, startInVideo }: { episode: Episode; star
   const switchMode = (next: 'audio' | 'video') => {
     if (next === mode) return;
     if (next === 'video') {
-      videoStart.current = position;
+      setVideoStart((v) => ({ sec: position, n: v.n + 1 }));
       if (isCurrent) player.pause();
     } else {
       player.playEpisode(episode, videoTime.current);
@@ -71,9 +72,7 @@ function NowPlaying({ episode, startAt, startInVideo }: { episode: Episode; star
 
   const jumpTo = (sec: number) => {
     if (mode === 'video') {
-      videoStart.current = sec;
-      setMode('audio');
-      setTimeout(() => setMode('video'));
+      setVideoStart((v) => ({ sec, n: v.n + 1 }));
     } else {
       player.playEpisode(episode, sec);
     }
@@ -106,7 +105,7 @@ function NowPlaying({ episode, startAt, startInVideo }: { episode: Episode; star
         )}
 
         {mode === 'video' ? (
-          <EpisodeVideo uri={episode.videoUrl} startAt={videoStart.current} onTime={(s) => (videoTime.current = s)} style={styles.video} />
+          <EpisodeVideo key={videoStart.n} uri={episode.videoUrl} startAt={videoStart.sec} onTime={(s) => (videoTime.current = s)} style={styles.video} />
         ) : (
           <View style={[styles.artWrap, { width: artSize, height: artSize, boxShadow: `0 24px 60px ${glow}` }]}>
             <Image source={{ uri: episode.artworkUrl }} style={[styles.art, { width: artSize, height: artSize }]} />

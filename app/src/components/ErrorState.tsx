@@ -5,7 +5,7 @@ import { colors } from '../theme';
 export function ErrorState({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
     <View style={styles.wrap}>
-      <Text style={styles.title}>Can't reach the podcast server</Text>
+      <Text style={styles.title}>Can’t reach the podcast server</Text>
       <Text style={styles.detail}>{message}</Text>
       <Text style={styles.detail}>Server: {API_URL}</Text>
       <Pressable style={styles.button} onPress={onRetry}>
