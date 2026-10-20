@@ -9,7 +9,7 @@ export default function HomeLayout() {
       <Stack.Screen
         name="index"
         options={{
-          title: 'AI Dev Podcast',
+          title: 'AI Dev Wave',
           headerRight: () => (
             <Pressable onPress={() => router.push('/host')} accessibilityRole="button" accessibilityLabel="Host mode" hitSlop={10}>
               <Icon name="upload" size={20} />

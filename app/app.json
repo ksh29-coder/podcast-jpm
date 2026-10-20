@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "AI Dev Podcast",
+    "name": "AI Dev Wave",
     "slug": "ai-dev-podcast",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -8,7 +8,7 @@
     "userInterfaceStyle": "dark",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.example.aidevpodcast"
+      "bundleIdentifier": "com.ksh29.aidevwave"
     },
     "android": {
       "adaptiveIcon": {
@@ -18,7 +18,7 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.example.aidevpodcast",
+      "package": "com.ksh29.aidevwave",
       "permissions": [
         "android.permission.RECORD_AUDIO",
         "android.permission.MODIFY_AUDIO_SETTINGS",
@@ -59,7 +59,7 @@
         }
       ]
     ],
-    "scheme": "aidevpodcast",
+    "scheme": "aidevwave",
     "experiments": {
       "typedRoutes": false
     },
