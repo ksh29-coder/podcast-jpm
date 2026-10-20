@@ -15,7 +15,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#0B1220",
+        "backgroundColor": "#17121F",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
@@ -65,6 +65,14 @@
           "cameraPermission": "Record Shorts for the podcast.",
           "microphonePermission": "Record sound for your Shorts.",
           "recordAudioAndroid": true
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#09090D",
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 120
         }
       ]
     ],
