@@ -95,6 +95,8 @@ function createStore({ db, video, ai, transcriber, tint = tintFromUrl }) {
           }
         : null,
       createdAt: new Date(row.created_at).toISOString(),
+      // In the future when scheduled.
+      publishedAt: row.published_at ? new Date(row.published_at).toISOString() : null,
     };
   }
 
@@ -103,7 +105,7 @@ function createStore({ db, video, ai, transcriber, tint = tintFromUrl }) {
     const missing = rows.filter((r) => !r.tint);
     await Promise.all(
       missing.map(async (r) => {
-        const src = r.playback_id ? `https://image.mux.com/${r.playback_id}/thumbnail.jpg?time=${r.thumbnail_sec}&width=32&height=32` : absolutize(r.artwork_url, baseUrl);
+        const src = r.playback_id ? video.thumbnailUrl(r.playback_id, r.thumbnail_sec, 32) : absolutize(r.artwork_url, baseUrl);
         const color = src && (await tint(src));
         if (!color) return;
         r.tint = color;
@@ -116,7 +118,7 @@ function createStore({ db, video, ai, transcriber, tint = tintFromUrl }) {
   async function shortsFor(episodeIds, { publishedOnly }) {
     if (!episodeIds.length) return new Map();
     const { rows } = await db.query(
-      `${SHORT_SELECT} where s.episode_id = any($1) ${publishedOnly ? "and s.status = 'published'" : ''}
+      `${SHORT_SELECT} where s.episode_id = any($1) ${publishedOnly ? `and ${live('s')}` : ''}
        order by s.start_sec nulls last, s.created_at`,
       [episodeIds]
     );
@@ -243,29 +245,60 @@ function createStore({ db, video, ai, transcriber, tint = tintFromUrl }) {
     }
   }
 
-  const PUBLISHED = "status = 'published'";
+  // Ask the AI for suggestions from the episode's transcript and keep them
+  // for the host to review. Needs the transcript, so it may ask the host to wait.
+  async function generateInsights(episodeId, baseUrl) {
+    if (!ai) throw httpError(503, 'AI isn’t set up on this server');
+    // Bring the upload's processing state up to date first.
+    const { rows: vids } = await db.query('select video_id from episodes where id = $1', [episodeId]);
+    if (vids[0]?.video_id) await syncVideos([vids[0].video_id]);
+    const { rows } = await db.query(
+      `select e.title, e.description, v.*, v.duration_sec as video_duration_sec from episodes e join videos v on v.id = e.video_id where e.id = $1`,
+      [episodeId]
+    );
+    const v = rows[0];
+    if (!v) throw httpError(404, 'This episode has no uploaded video to read');
+    const status = await ensureTranscript(v, { thorough: true, baseUrl });
+    if (status === 'unavailable') throw httpError(409, 'This episode has no spoken audio, so there’s nothing for the AI to read');
+    if (status !== 'ready') throw httpError(409, 'The transcript is still being prepared. Try again in a few minutes.');
+    const { rows: cueRows } = await db.query('select start_sec, end_sec, text, speaker from transcript_cues where video_id = $1 order by idx', [v.id]);
+    const cues = cueRows.map((c) => ({ startSec: c.start_sec, endSec: c.end_sec, text: c.text, speaker: c.speaker }));
+    const durationSec = v.video_duration_sec || cues.at(-1)?.endSec || 0;
+    const raw = await ai.episodeInsights({ title: v.title, description: v.description, durationSec, cues });
+    const insights = { ...cleanInsights(raw, { durationSec, cues }), model: ai.model, generatedAt: new Date().toISOString() };
+    await db.query('update episodes set ai = $2, updated_at = now() where id = $1', [episodeId, JSON.stringify(insights)]);
+  }
+
+  // Visible to listeners: published, and the release time (if scheduled) has come.
+  const live = (alias) => `${alias}.status = 'published' and ${alias}.published_at <= now()`;
 
   return {
     async listEpisodes(baseUrl) {
-      const { rows } = await db.query(`${EPISODE_SELECT} where e.${PUBLISHED} order by e.published_at desc`);
+      const { rows } = await db.query(`${EPISODE_SELECT} where ${live('e')} order by e.published_at desc`);
       await fillTints(rows, baseUrl);
       const shorts = await shortsFor(rows.map((r) => r.id), { publishedOnly: true });
       return rows.map((r) => toEpisode(r, shorts.get(r.id) || [], baseUrl));
     },
 
     async getEpisode(id, baseUrl, { host = false } = {}) {
-      const { rows } = await db.query(`${EPISODE_SELECT} where e.id = $1 ${host ? '' : `and e.${PUBLISHED}`}`, [id]);
+      const { rows } = await db.query(`${EPISODE_SELECT} where e.id = $1 ${host ? '' : `and ${live('e')}`}`, [id]);
       if (!rows[0]) return null;
       await fillTints(rows, baseUrl);
       const shorts = await shortsFor([id], { publishedOnly: !host });
       const out = toEpisode(rows[0], shorts.get(id) || [], baseUrl);
       if (!host) return out;
+      // Every speaker the transcript found, so hosts can name each one.
+      const { rows: voices } = await db.query(
+        'select distinct speaker from transcript_cues where video_id = $1 and speaker is not null order by speaker',
+        [rows[0].video_id]
+      );
       return withHostFields(
         {
           ...out,
           thumbnailSec: rows[0].thumbnail_sec,
           ai: rows[0].ai || null,
           speakers: rows[0].speakers || {},
+          transcriptSpeakers: voices.map((r) => String(r.speaker)),
           clips: (shorts.get(id) || []).map((s) => withHostFields(toShort(s, baseUrl), s)),
         },
         rows[0]
@@ -273,7 +306,7 @@ function createStore({ db, video, ai, transcriber, tint = tintFromUrl }) {
     },
 
     async listShorts(baseUrl) {
-      const { rows } = await db.query(`${SHORT_SELECT} where s.${PUBLISHED} order by s.published_at desc, s.start_sec`);
+      const { rows } = await db.query(`${SHORT_SELECT} where ${live('s')} order by s.published_at desc, s.start_sec`);
       return rows.map((r) => toShort(r, baseUrl));
     },
 
@@ -287,7 +320,7 @@ function createStore({ db, video, ai, transcriber, tint = tintFromUrl }) {
     // first request asks the video service to start if nobody has yet.
     async transcript(episodeId) {
       const { rows } = await db.query(
-        `select v.*, e.speakers from episodes e join videos v on v.id = e.video_id where e.id = $1 and e.${PUBLISHED}`,
+        `select v.*, e.speakers from episodes e join videos v on v.id = e.video_id where e.id = $1 and ${live('e')}`,
         [episodeId]
       );
       const v = rows[0];
@@ -308,12 +341,12 @@ function createStore({ db, video, ai, transcriber, tint = tintFromUrl }) {
     async search(q, baseUrl) {
       const like = `%${q.replace(/[\\%_]/g, (c) => '\\' + c)}%`;
       const eps = await db.query(
-        `${EPISODE_SELECT} where e.${PUBLISHED} and (e.title ilike $1 or e.description ilike $1 or exists (select 1 from unnest(e.tags) t where t ilike $1))
+        `${EPISODE_SELECT} where ${live('e')} and (e.title ilike $1 or e.description ilike $1 or exists (select 1 from unnest(e.tags) t where t ilike $1))
          order by e.published_at desc limit 20`,
         [like]
       );
       const shorts = await db.query(
-        `${SHORT_SELECT} where s.${PUBLISHED} and (s.title ilike $1 or exists (select 1 from unnest(s.tags) t where t ilike $1))
+        `${SHORT_SELECT} where ${live('s')} and (s.title ilike $1 or exists (select 1 from unnest(s.tags) t where t ilike $1))
          order by s.published_at desc limit 20`,
         [like]
       );
@@ -321,7 +354,7 @@ function createStore({ db, video, ai, transcriber, tint = tintFromUrl }) {
       const moments = await db.query(
         `select e.id as episode_id, e.title as episode_title, c.start_sec, c.text
          from transcript_cues c join episodes e on e.video_id = c.video_id
-         where e.${PUBLISHED} and c.text ilike $1
+         where ${live('e')} and c.text ilike $1
          order by e.published_at desc, c.idx limit 30`,
         [like]
       );
@@ -357,6 +390,21 @@ function createStore({ db, video, ai, transcriber, tint = tintFromUrl }) {
       return rows.map((r) => withHostFields(toShort(r, baseUrl), r));
     },
 
+    async reach(episodeId) {
+      const ep = await this.getEpisode(episodeId, '', { host: true });
+      if (!ep) return null;
+      const d = ep.durationSec || 0;
+      const { rows } = await db.query('select max_sec from progress where episode_id = $1', [episodeId]);
+      const listeners = rows.length;
+      // Share of listeners who got at least to the start of each tenth (0%, 10% … 90%), and to the end.
+      const points = Array.from({ length: 11 }, (_, i) => {
+        const at = (d * i) / 10;
+        const reached = rows.filter((r) => r.max_sec >= at - (i === 10 ? 5 : 0)).length;
+        return { percent: i * 10, atSec: Math.round(at), listeners: reached, share: listeners ? reached / listeners : 0 };
+      });
+      return { listeners, durationSec: d, points };
+    },
+
     // Host asks to (re)make the transcript with the speech-to-text service.
     async retranscribe(episodeId, baseUrl) {
       if (!transcriber) throw httpError(503, 'Transcription isn’t set up on this server');
@@ -378,27 +426,7 @@ function createStore({ db, video, ai, transcriber, tint = tintFromUrl }) {
 
     // Ask the AI for suggestions from the episode's transcript and keep them
     // for the host to review. Needs the transcript, so it may ask the host to wait.
-    async generateInsights(episodeId, baseUrl) {
-      if (!ai) throw httpError(503, 'AI isn’t set up on this server');
-      // Bring the upload's processing state up to date first.
-      const { rows: vids } = await db.query('select video_id from episodes where id = $1', [episodeId]);
-      if (vids[0]?.video_id) await syncVideos([vids[0].video_id]);
-      const { rows } = await db.query(
-        `select e.title, e.description, v.*, v.duration_sec as video_duration_sec from episodes e join videos v on v.id = e.video_id where e.id = $1`,
-        [episodeId]
-      );
-      const v = rows[0];
-      if (!v) throw httpError(404, 'This episode has no uploaded video to read');
-      const status = await ensureTranscript(v, { thorough: true, baseUrl });
-      if (status === 'unavailable') throw httpError(409, 'This episode has no spoken audio, so there’s nothing for the AI to read');
-      if (status !== 'ready') throw httpError(409, 'The transcript is still being prepared. Try again in a few minutes.');
-      const { rows: cueRows } = await db.query('select start_sec, end_sec, text, speaker from transcript_cues where video_id = $1 order by idx', [v.id]);
-      const cues = cueRows.map((c) => ({ startSec: c.start_sec, endSec: c.end_sec, text: c.text, speaker: c.speaker }));
-      const durationSec = v.video_duration_sec || cues.at(-1)?.endSec || 0;
-      const raw = await ai.episodeInsights({ title: v.title, description: v.description, durationSec, cues });
-      const insights = { ...cleanInsights(raw, { durationSec, cues }), model: ai.model, generatedAt: new Date().toISOString() };
-      await db.query('update episodes set ai = $2, updated_at = now() where id = $1', [episodeId, JSON.stringify(insights)]);
-    },
+    generateInsights,
 
     async createUpload({ kind }) {
       const { uploadId, uploadUrl } = await video.createUpload({ audio: kind === 'episode' });
@@ -508,9 +536,15 @@ function createStore({ db, video, ai, transcriber, tint = tintFromUrl }) {
         if (v && table === 'shorts' && v.duration_sec > MAX_SHORT_SEC + 0.5) {
           throw httpError(400, `A Short can be at most ${MAX_SHORT_SEC} seconds`);
         }
-        if (!row.published_at) set.published_at = new Date().toISOString();
+        // A release time in the future schedules it; otherwise it goes live now.
+        if (fields.publishAt) set.published_at = fields.publishAt;
+        else if (!row.published_at || new Date(row.published_at) > new Date()) set.published_at = new Date().toISOString();
         // Start the transcript now so it's ready (and searchable) sooner.
         if (table === 'episodes' && v) await ensureTranscript(v, { thorough: true, baseUrl: fields.baseUrl }).catch((e) => console.warn('transcript', v.id, e.message));
+        // Have AI suggestions waiting for the host, the first time only.
+        if (table === 'episodes' && v && ai && !row.ai) {
+          await generateInsights(id, fields.baseUrl).catch((e) => console.warn('ai on publish', id, e.message));
+        }
       }
     }
     // A new cover frame means a new backdrop color.

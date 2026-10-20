@@ -5,7 +5,7 @@ import { useHost } from '../../components/host/HostGate';
 import { Icon } from '../../components/Icon';
 import { ui } from '../../components/host/ui';
 import { formatTime } from '../../lib/format';
-import { STATUS_LABEL, videoLabel, type HostComment, type HostEpisode, type HostShort, type Status } from '../../lib/host';
+import { formatWhen, isScheduled, STATUS_LABEL, videoLabel, type HostComment, type HostEpisode, type HostShort, type Status } from '../../lib/host';
 import { colors } from '../../theme';
 
 const isWeb = Platform.OS === 'web';
@@ -128,13 +128,19 @@ export default function HostHome() {
       {comments.length > 0 && (
         <>
           <Text style={ui.section}>Comments to review ({comments.length})</Text>
-          <Text style={ui.hint}>Viewers only see comments you approve.</Text>
+          <Text style={ui.hint}>Viewers only see comments you approve. Reported comments come back here, hidden.</Text>
           {comments.map((c) => (
             <View key={c.id} style={ui.card}>
               <Text style={ui.hint}>
-                {c.authorName} on “{c.itemTitle ?? c.itemId}”
+                {c.authorName} on “{c.itemTitle ?? c.itemId}”{c.atSec != null ? ` at ${formatTime(c.atSec)}` : ''}
               </Text>
               <Text style={styles.title}>{c.body}</Text>
+              {c.reports.length > 0 && (
+                <Text style={[ui.hint, { color: colors.danger }]}>
+                  Reported {c.reports.length === 1 ? 'once' : `${c.reports.length} times`}
+                  {c.reports.some(Boolean) ? `: ${c.reports.filter(Boolean).join('; ')}` : ''}. Hidden until you approve it again.
+                </Text>
+              )}
               <View style={ui.row}>
                 <Pressable style={[ui.button, busyId === c.id && ui.buttonDisabled]} disabled={busyId === c.id} onPress={() => review(c.id, 'approved')}>
                   <Text style={ui.buttonText}>Approve</Text>
@@ -157,6 +163,8 @@ export default function HostHome() {
           meta={[ep.durationSec ? formatTime(ep.durationSec) : null, ep.tags.map((t) => `#${t}`).join(' ') || null].filter(Boolean).join(' · ') || null}
           counts={ep}
           status={ep.status}
+          scheduledFor={isScheduled(ep) ? ep.publishedAt : null}
+          onEdit={() => router.push(`/host/episode/${ep.id}`)}
           progress={videoLabel(ep.video, { needsAudio: true })}
           busy={busyId === ep.id}
           onStatus={(s) => setStatus('episode', ep.id, s)}
@@ -193,6 +201,8 @@ export default function HostHome() {
             .join(' · ')}
           counts={s}
           status={s.status}
+          scheduledFor={isScheduled(s) ? s.publishedAt : null}
+          onEdit={() => router.push(`/host/short/${s.id}`)}
           progress={videoLabel(s.video)}
           busy={busyId === s.id}
           onStatus={(st) => setStatus('short', s.id, st)}
@@ -208,6 +218,8 @@ function ItemCard({
   meta,
   counts,
   status,
+  scheduledFor,
+  onEdit,
   progress,
   busy,
   onStatus,
@@ -218,6 +230,8 @@ function ItemCard({
   meta: string | null;
   counts: { likes: number; views: number; comments: number };
   status: Status;
+  scheduledFor: string | null;
+  onEdit: () => void;
   progress: string | null;
   busy: boolean;
   onStatus: (s: Status) => void;
@@ -238,13 +252,15 @@ function ItemCard({
           {counts.views} views · {counts.likes} likes · {counts.comments} comments
         </Text>
         <View style={ui.row}>
-          <Text style={[styles.chip, status === 'published' && styles.chipLive]}>{STATUS_LABEL[status]}</Text>
+          <Text style={[styles.chip, status === 'published' && !scheduledFor && styles.chipLive]}>
+            {scheduledFor ? `Scheduled · ${formatWhen(scheduledFor)}` : STATUS_LABEL[status]}
+          </Text>
           {progress && <Text style={[ui.hint, failed && ui.error]}>{progress}</Text>}
         </View>
         <View style={[ui.row, { marginTop: 4 }]}>
           {status === 'published' ? (
             <Pressable style={[ui.button, ui.secondary, busy && ui.buttonDisabled]} disabled={busy} onPress={() => onStatus('draft')}>
-              <Text style={ui.secondaryText}>Unpublish</Text>
+              <Text style={ui.secondaryText}>{scheduledFor ? 'Cancel schedule' : 'Unpublish'}</Text>
             </Pressable>
           ) : (
             <Pressable style={[ui.button, (busy || !canPublish) && ui.buttonDisabled]} disabled={busy || !canPublish} onPress={() => onStatus('published')}>
@@ -256,6 +272,9 @@ function ItemCard({
               <Text style={ui.secondaryText}>Reject</Text>
             </Pressable>
           )}
+          <Pressable style={[ui.button, ui.secondary]} onPress={onEdit}>
+            <Text style={ui.secondaryText}>Edit</Text>
+          </Pressable>
           {extra}
         </View>
       </View>

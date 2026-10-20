@@ -43,10 +43,6 @@ function createApp({ db = connect(), video = muxVideo(), ai = openRouterAi(), tr
     next();
   });
 
-  // In-memory listening positions, keyed by user then episode. Lets a listener
-  // resume on another device; swap for a real store before production.
-  const progress = new Map();
-
   const baseUrl = (req) => process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`;
 
   app.get('/health', (req, res) => res.json({ ok: true }));
@@ -67,7 +63,7 @@ function createApp({ db = connect(), video = muxVideo(), ai = openRouterAi(), tr
   app.use('/media', express.static(mediaDir, { fallthrough: false }));
 
   app.use('/api', ensureDb);
-  app.use('/api/host', hostRouter({ store, engagement, baseUrl, passcode: hostPasscode }));
+  app.use('/api/host', hostRouter({ store, engagement, baseUrl, passcode: hostPasscode, db }));
   app.use('/api/items', engagement.router());
 
   app.get(
@@ -124,9 +120,13 @@ function createApp({ db = connect(), video = muxVideo(), ai = openRouterAi(), tr
     ah(async (req, res) => res.json(await engagement.withStats('short', await store.listShorts(baseUrl(req)), req.user.id)))
   );
 
-  app.get('/api/progress', (req, res) => {
-    res.json(Object.fromEntries(progress.get(req.user.id) || []));
-  });
+  app.get(
+    '/api/progress',
+    ah(async (req, res) => {
+      const { rows } = await db.query('select episode_id, position_sec, updated_at from progress where user_id = $1', [req.user.id]);
+      res.json(Object.fromEntries(rows.map((r) => [r.episode_id, { positionSec: r.position_sec, updatedAt: new Date(r.updated_at).toISOString() }])));
+    })
+  );
 
   app.put(
     '/api/progress/:episodeId',
@@ -137,10 +137,14 @@ function createApp({ db = connect(), video = muxVideo(), ai = openRouterAi(), tr
       if (typeof positionSec !== 'number' || positionSec < 0 || positionSec > durationSec) {
         return res.status(400).json({ error: `positionSec must be a number between 0 and ${durationSec}` });
       }
-      if (!progress.has(req.user.id)) progress.set(req.user.id, new Map());
-      const entry = { positionSec, updatedAt: new Date().toISOString() };
-      progress.get(req.user.id).set(req.params.episodeId, entry);
-      res.json(entry);
+      const { rows } = await db.query(
+        `insert into progress (user_id, episode_id, position_sec, max_sec) values ($1, $2, $3, $3)
+         on conflict (user_id, episode_id) do update
+           set position_sec = excluded.position_sec, max_sec = greatest(progress.max_sec, excluded.position_sec), updated_at = now()
+         returning position_sec, updated_at`,
+        [req.user.id, req.params.episodeId, positionSec]
+      );
+      res.json({ positionSec: rows[0].position_sec, updatedAt: new Date(rows[0].updated_at).toISOString() });
     })
   );
 

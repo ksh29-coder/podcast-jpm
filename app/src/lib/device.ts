@@ -19,3 +19,13 @@ export function getDeviceId(): Promise<string> {
 
 export const getDisplayName = () => getItem('display-name');
 export const saveDisplayName = (name: string) => setItem('display-name', name);
+
+// Commenters this person has blocked (anonymous author keys), kept on the device.
+export async function getBlocked(): Promise<string[]> {
+  try {
+    return JSON.parse((await getItem('blocked-authors')) || '[]');
+  } catch {
+    return [];
+  }
+}
+export const saveBlocked = (keys: string[]) => setItem('blocked-authors', JSON.stringify(keys));

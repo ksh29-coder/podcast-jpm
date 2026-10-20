@@ -150,8 +150,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         return;
       }
       if (episode?.id === ep.id && startSec !== undefined) {
-        player.seekTo(startSec);
-        player.play();
+        // After the episode has finished, play() sent before the seek lands is dropped.
+        player.seekTo(startSec).then(() => player.play(), () => player.play());
         return;
       }
       // Video-only episodes have nothing for the audio player to play.

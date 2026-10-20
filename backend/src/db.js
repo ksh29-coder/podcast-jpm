@@ -103,6 +103,26 @@ alter table transcript_cues add column if not exists speaker int;
 -- Names for those speakers, set by a host (often from AI suggestions): {"0": "Kai"}.
 alter table episodes add column if not exists speakers jsonb not null default '{}';
 
+-- Where each person (device, until sign-in) got to in each episode, so they
+-- can resume anywhere; max_sec is the furthest they've reached, for hosts'
+-- "how far people got" view.
+create table if not exists progress (
+  user_id text not null,
+  episode_id text not null references episodes(id) on delete cascade,
+  position_sec double precision not null,
+  max_sec double precision not null,
+  updated_at timestamptz not null default now(),
+  primary key (user_id, episode_id)
+);
+
+-- Wrong host-passcode guesses per network address, for the lockout.
+create table if not exists host_attempts (
+  key text primary key,
+  failures int not null,
+  window_start timestamptz not null,
+  locked_until timestamptz
+);
+
 -- One like per person (device, until sign-in) per episode or Short.
 create table if not exists likes (
   item_type text not null check (item_type in ('episode', 'short')),
@@ -133,6 +153,18 @@ create table if not exists comments (
   created_at timestamptz not null default now()
 );
 create index if not exists comments_item on comments (item_type, item_id, status);
+-- Optional moment in the episode the comment is about.
+alter table comments add column if not exists at_sec double precision;
+
+-- Reports of comments by viewers. A reported comment is hidden until a host
+-- looks at it again (approve to show it, reject to keep it hidden).
+create table if not exists comment_reports (
+  comment_id text not null references comments(id) on delete cascade,
+  user_id text not null,
+  reason text not null default '',
+  created_at timestamptz not null default now(),
+  primary key (comment_id, user_id)
+);
 `;
 
 // Creates the tables if needed, and fills an empty database from
