@@ -7,7 +7,10 @@
     "production": {
       "channel": "production",
       "environment": "production",
-      "autoIncrement": true
+      "autoIncrement": true,
+      "ios": {
+        "image": "sdk-57"
+      }
     }
   },
   "submit": {
