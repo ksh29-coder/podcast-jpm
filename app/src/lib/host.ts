@@ -36,9 +36,13 @@ export type VideoState = {
   durationSec?: number | null;
 };
 
-type HostFields = { status: Status; video: VideoState | null; createdAt: string };
+// publishedAt is in the future while a release is scheduled.
+type HostFields = { status: Status; video: VideoState | null; createdAt: string; publishedAt: string | null };
+
+// Of everyone who started an episode, how many reached each tenth of it.
+export type Reach = { listeners: number; durationSec: number; points: { percent: number; atSec: number; listeners: number; share: number }[] };
 export type HostEpisode = Omit<Episode, 'clips'> &
-  HostFields & { thumbnailSec?: number; ai?: AiSuggestions | null; speakers?: Record<string, string>; clips: HostShort[] };
+  HostFields & { thumbnailSec?: number; ai?: AiSuggestions | null; speakers?: Record<string, string>; transcriptSpeakers?: string[]; clips: HostShort[] };
 export type HostShort = Clip & HostFields & Stats & { episodeId: string | null; episodeTitle: string | null; artworkUrl: string | null };
 
 export const MAX_SHORT_SEC = 90;
@@ -60,6 +64,9 @@ export type HostComment = {
   itemType: 'episode' | 'short';
   itemId: string;
   itemTitle: string | null;
+  atSec: number | null;
+  // Reasons from viewers who reported it.
+  reports: string[];
 };
 
 export function hostApi(passcode: string) {
@@ -92,6 +99,7 @@ export function hostApi(passcode: string) {
         summary: string | null;
         mentions: Mention[];
         speakers: Record<string, string>;
+        publishAt: string;
       }>
     ) =>
       call<HostEpisode>('PATCH', `/episodes/${id}`, body),
@@ -99,7 +107,9 @@ export function hostApi(passcode: string) {
     clipShort: (body: { episodeId: string; title: string; startSec: number; endSec: number; focusX: number; tags: string[] }) =>
       call<HostShort>('POST', '/shorts', body),
     uploadShort: (body: { videoId: string; title: string; episodeId?: string; focusX?: number; tags: string[] }) => call<HostShort>('POST', '/shorts', body),
-    updateShort: (id: string, body: Partial<{ title: string; focusX: number; tags: string[]; status: Status }>) => call<HostShort>('PATCH', `/shorts/${id}`, body),
+    updateShort: (id: string, body: Partial<{ title: string; focusX: number; tags: string[]; status: Status; publishAt: string }>) =>
+      call<HostShort>('PATCH', `/shorts/${id}`, body),
+    reach: (id: string) => call<Reach>('GET', `/episodes/${id}/reach`),
     comments: () => call<HostComment[]>('GET', '/comments'),
     setCommentStatus: (id: string, status: 'approved' | 'rejected') => call<void>('PATCH', `/comments/${id}`, { status }),
   };
@@ -124,3 +134,12 @@ export function videoLabel(v: VideoState | null, { needsAudio = false } = {}) {
   return null;
 }
 
+
+// "Scheduled · Tue 21 Oct, 09:00" when published with a future release time.
+export function isScheduled(item: { status: Status; publishedAt: string | null }) {
+  return item.status === 'published' && !!item.publishedAt && new Date(item.publishedAt).getTime() > Date.now();
+}
+
+export function formatWhen(iso: string) {
+  return new Date(iso).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+}

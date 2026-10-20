@@ -1,7 +1,6 @@
-import { useIsFocused } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, useWindowDimensions, View, type ViewToken } from 'react-native';
-import { router } from 'expo-router';
+import { router, useIsFocused } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ErrorState } from '../../components/ErrorState';
 import { Glass } from '../../components/Glass';
@@ -29,9 +28,10 @@ export default function ShortsScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focused]);
 
-  const onViewable = useRef(({ viewableItems }: { viewableItems: ViewToken[] }) => {
+  // FlatList needs the same callback for its whole life.
+  const [onViewable] = useState(() => ({ viewableItems }: { viewableItems: ViewToken[] }) => {
     if (viewableItems[0]) setVisibleId((viewableItems[0].item as Short).id);
-  }).current;
+  });
 
   if (error && !data) return <ErrorState message={error} onRetry={reload} />;
   if (!data) return <ActivityIndicator style={{ flex: 1 }} color={colors.accent} />;
@@ -70,9 +70,12 @@ function ShortItem({ short, height, active, index, total }: { short: Short; heig
   const video = useRef<ShortVideoHandle>(null);
   const [time, setTime] = useState({ position: 0, duration: 0 });
 
-  useEffect(() => {
+  // Scrolling away clears a pause, so it plays when you come back.
+  const [wasActive, setWasActive] = useState(active);
+  if (active !== wasActive) {
+    setWasActive(active);
     if (!active) setPaused(false);
-  }, [active]);
+  }
 
   // Counts as a view after two seconds on screen (the server counts each device once).
   useEffect(() => {

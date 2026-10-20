@@ -8,13 +8,47 @@ const { httpError, MAX_SHORT_SEC } = require('./store');
 // Until SSO lands, hosts unlock it with a shared passcode (HOST_PASSCODE),
 // sent as the X-Host-Passcode header. Swap this check for a role on req.user
 // once real sign-in exists.
-function requireHost(passcode = process.env.HOST_PASSCODE) {
+//
+// Wrong guesses are limited per network address: after MAX_FAILURES within
+// WINDOW_MIN minutes, that address is locked out for WINDOW_MIN minutes. The
+// count lives in the database because serverless instances share no memory.
+const MAX_FAILURES = 10;
+const WINDOW_MIN = 15;
+
+function requireHost(passcode = process.env.HOST_PASSCODE, db) {
   const expected = passcode && crypto.createHash('sha256').update(passcode).digest();
-  return (req, res, next) => {
-    if (!expected) return res.status(503).json({ error: 'Host mode is not set up on this server' });
-    const given = crypto.createHash('sha256').update(String(req.get('X-Host-Passcode') || '')).digest();
-    if (!crypto.timingSafeEqual(given, expected)) return res.status(401).json({ error: 'Wrong host passcode' });
-    next();
+  return async (req, res, next) => {
+    try {
+      if (!expected) return res.status(503).json({ error: 'Host mode is not set up on this server' });
+      const key = `ip:${req.ip}`;
+      if (db) {
+        const { rows } = await db.query('select locked_until from host_attempts where key = $1 and locked_until > now()', [key]);
+        if (rows[0]) {
+          const mins = Math.max(1, Math.ceil((new Date(rows[0].locked_until) - Date.now()) / 60_000));
+          return res.status(429).json({ error: `Too many wrong passcodes. Try again in ${mins} minute${mins === 1 ? '' : 's'}.` });
+        }
+      }
+      const given = crypto.createHash('sha256').update(String(req.get('X-Host-Passcode') || '')).digest();
+      if (!crypto.timingSafeEqual(given, expected)) {
+        if (db) {
+          await db.query(
+            `insert into host_attempts (key, failures, window_start) values ($1, 1, now())
+             on conflict (key) do update set
+               failures = case when host_attempts.window_start < now() - interval '${WINDOW_MIN} minutes' then 1 else host_attempts.failures + 1 end,
+               window_start = case when host_attempts.window_start < now() - interval '${WINDOW_MIN} minutes' then now() else host_attempts.window_start end,
+               locked_until = case
+                 when host_attempts.window_start >= now() - interval '${WINDOW_MIN} minutes' and host_attempts.failures + 1 >= ${MAX_FAILURES}
+                 then now() + interval '${WINDOW_MIN} minutes' else null end`,
+            [key]
+          );
+        }
+        return res.status(401).json({ error: 'Wrong host passcode' });
+      }
+      if (db) await db.query('delete from host_attempts where key = $1', [key]);
+      next();
+    } catch (e) {
+      next(e);
+    }
   };
 }
 
@@ -34,6 +68,16 @@ function num(value, name, { required = false, min = -Infinity, max = Infinity } 
     throw httpError(400, `${name} must be a number${Number.isFinite(min) ? ` from ${min}` : ''}${Number.isFinite(max) ? ` to ${max}` : ''}`);
   }
   return value;
+}
+
+// An ISO time up to a year ahead; only with status "published".
+function publishAt(value, statusValue) {
+  if (value === undefined || value === null) return undefined;
+  const t = new Date(value);
+  if (typeof value !== 'string' || Number.isNaN(t.getTime())) throw httpError(400, 'publishAt must be a date and time');
+  if (t.getTime() > Date.now() + 366 * 24 * 3600_000) throw httpError(400, 'publishAt can be at most a year ahead');
+  if (statusValue !== 'published') throw httpError(400, 'Set status to "published" together with publishAt to schedule it');
+  return t.toISOString();
 }
 
 function status(value) {
@@ -86,9 +130,9 @@ function chapters(value) {
   }));
 }
 
-function hostRouter({ store, engagement, baseUrl, passcode }) {
+function hostRouter({ store, engagement, baseUrl, passcode, db }) {
   const r = express.Router();
-  r.use(requireHost(passcode));
+  r.use(requireHost(passcode, db));
   const by = () => 'host';
 
   // Lets the app check a passcode before showing host screens.
@@ -155,9 +199,21 @@ function hostRouter({ store, engagement, baseUrl, passcode }) {
         speakers: speakers(b.speakers),
         thumbnailSec: num(b.thumbnailSec, 'thumbnailSec', { min: 0 }),
         status: status(b.status),
+        publishAt: publishAt(b.publishAt, b.status),
       }, baseUrl(req));
       if (!found) throw httpError(404, 'Episode not found');
       res.json(await store.getEpisode(req.params.id, baseUrl(req), { host: true }));
+    })
+  );
+
+  // How far people got: of everyone who started the episode, the share who
+  // reached each tenth of it.
+  r.get(
+    '/episodes/:id/reach',
+    ah(async (req, res) => {
+      const reach = await store.reach(req.params.id);
+      if (!reach) throw httpError(404, 'Episode not found');
+      res.json(reach);
     })
   );
 
@@ -239,6 +295,7 @@ function hostRouter({ store, engagement, baseUrl, passcode }) {
         focusX: num(b.focusX, 'focusX', { min: 0, max: 1 }),
         tags: tags(b.tags),
         status: status(b.status),
+        publishAt: publishAt(b.publishAt, b.status),
       });
       if (!found) throw httpError(404, 'Short not found');
       const all = await store.hostShorts(baseUrl(req));

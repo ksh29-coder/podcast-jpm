@@ -26,11 +26,13 @@ const fakeAi = {
 let server;
 let base;
 let video;
+let db;
 let tints = 0; // each computed backdrop color is different, so recomputes are visible
 
 before(async () => {
   video = fakeVideo();
-  server = createApp({ db: new PGlite(), video, ai: fakeAi, tint: async () => `#3344${String(++tints).padStart(2, '0')}`, hostPasscode: PASSCODE }).listen(0);
+  db = new PGlite();
+  server = createApp({ db, video, ai: fakeAi, tint: async () => `#3344${String(++tints).padStart(2, '0')}`, hostPasscode: PASSCODE }).listen(0);
   await new Promise((resolve) => server.once('listening', resolve));
   base = `http://127.0.0.1:${server.address().port}`;
 });
@@ -50,6 +52,18 @@ const get = async (path) => (await fetch(`${base}${path}`)).json();
 test('host routes need the passcode', async () => {
   assert.strictEqual((await host('GET', '/session', undefined, 'wrong')).status, 401);
   assert.strictEqual((await host('GET', '/session', undefined, '')).status, 401);
+  assert.strictEqual((await host('GET', '/session')).status, 200);
+});
+
+test('too many wrong passcodes lock that address out, even with the right one', async () => {
+  // The right passcode above cleared earlier failures; 10 wrong in a row locks.
+  for (let i = 0; i < 9; i++) assert.strictEqual((await host('GET', '/session', undefined, `guess${i}`)).status, 401);
+  assert.strictEqual((await host('GET', '/session', undefined, 'guess9')).status, 401);
+  const locked = await host('GET', '/session');
+  assert.strictEqual(locked.status, 429);
+  assert.match(locked.body.error, /Try again in 15 minutes/);
+  // Unlock for the remaining tests.
+  await db.query('delete from host_attempts');
   assert.strictEqual((await host('GET', '/session')).status, 200);
 });
 
@@ -285,4 +299,36 @@ test('AI suggestions: generated from the transcript, cleaned, and applied by a h
 
 test('AI needs a transcript-capable episode', async () => {
   assert.strictEqual((await host('POST', '/episodes/ep001/ai')).status, 404, 'seeded episodes have no uploaded video');
+});
+
+test('scheduled publishing: hidden until the release time', async () => {
+  const later = new Date(Date.now() + 3600_000).toISOString();
+  const res = await host('PATCH', '/episodes/ep002', { status: 'published', publishAt: later });
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.body.publishedAt, later);
+  assert.ok(!(await get('/api/episodes')).some((e) => e.id === 'ep002'), 'not listed yet');
+  assert.strictEqual((await fetch(`${base}/api/episodes/ep002`)).status, 404);
+
+  // Bring it forward to now: listed again.
+  await host('PATCH', '/episodes/ep002', { status: 'published' });
+  assert.ok((await get('/api/episodes')).some((e) => e.id === 'ep002'));
+
+  assert.strictEqual((await host('PATCH', '/episodes/ep002', { status: 'draft', publishAt: later })).status, 400);
+  assert.strictEqual((await host('PATCH', '/episodes/ep002', { status: 'published', publishAt: 'soon' })).status, 400);
+  assert.strictEqual((await host('PATCH', '/shorts/ep001-c1', { status: 'published', publishAt: '2099-01-01T00:00:00Z' })).status, 400);
+});
+
+test('publishing an episode runs the AI once, so suggestions are waiting', async () => {
+  video.state.durationSec = 600;
+  video.state.captions = 'ready';
+  const before = aiCalls.length;
+  const up = await host('POST', '/uploads', { kind: 'episode' });
+  const ep = (await host('POST', '/episodes', { title: 'Auto AI', videoId: up.body.videoId })).body;
+  await host('PATCH', `/episodes/${ep.id}`, { status: 'published' });
+  assert.strictEqual(aiCalls.length, before + 1);
+  assert.ok((await host('GET', `/episodes/${ep.id}`)).body.ai.chapters.length > 0);
+  // Republishing doesn't run it again.
+  await host('PATCH', `/episodes/${ep.id}`, { status: 'draft' });
+  await host('PATCH', `/episodes/${ep.id}`, { status: 'published' });
+  assert.strictEqual(aiCalls.length, before + 1);
 });

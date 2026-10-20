@@ -56,6 +56,10 @@ export type Comment = {
   status: 'pending' | 'approved' | 'rejected';
   createdAt: string;
   mine?: boolean;
+  // Moment in the episode it's about, if any.
+  atSec?: number | null;
+  // Anonymous key for blocking this author on this device.
+  authorKey?: string;
 };
 
 // speaker: 0, 1, 2… from speaker detection (null if unknown).
@@ -110,8 +114,10 @@ export const api = {
     request<Stats>(`/api/items/${type}/${id}/like`, { method: liked ? 'PUT' : 'DELETE' }),
   view: (type: ItemType, id: string) => request<void>(`/api/items/${type}/${id}/view`, { method: 'POST' }),
   comments: (type: ItemType, id: string) => request<Comment[]>(`/api/items/${type}/${id}/comments`),
-  postComment: (type: ItemType, id: string, name: string, body: string) =>
-    request<Comment>(`/api/items/${type}/${id}/comments`, { method: 'POST', body: JSON.stringify({ name, body }) }),
+  postComment: (type: ItemType, id: string, name: string, body: string, atSec?: number) =>
+    request<Comment>(`/api/items/${type}/${id}/comments`, { method: 'POST', body: JSON.stringify({ name, body, atSec }) }),
+  reportComment: (type: ItemType, id: string, commentId: string, reason: string) =>
+    request<void>(`/api/items/${type}/${id}/comments/${commentId}/report`, { method: 'POST', body: JSON.stringify({ reason }) }),
   saveProgress: (episodeId: string, positionSec: number) =>
     request(`/api/progress/${episodeId}`, {
       method: 'PUT',
