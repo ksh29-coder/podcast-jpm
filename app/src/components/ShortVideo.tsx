@@ -13,11 +13,13 @@ type Props = {
   style: StyleProp<ViewStyle>;
   focusX: number;
   onTime: (position: number, duration: number) => void;
+  // 'contain' shows the whole frame (e.g. a wide episode in review).
+  fit?: 'cover' | 'contain';
   ref?: Ref<ShortVideoHandle>;
 };
 
 // A looping, chrome-less video for the Shorts feed.
-export function ShortVideo({ uri, playing, style, onTime, ref }: Props) {
+export function ShortVideo({ uri, playing, style, onTime, fit = 'cover', ref }: Props) {
   const player = useVideoPlayer(uri, (p) => {
     p.loop = true;
     p.timeUpdateEventInterval = 0.25;
@@ -28,5 +30,5 @@ export function ShortVideo({ uri, playing, style, onTime, ref }: Props) {
     else player.pause();
   }, [playing, player]);
   useImperativeHandle(ref, () => ({ seekTo: (sec) => player.seekBy(sec - player.currentTime) }), [player]);
-  return <VideoView player={player} style={style} contentFit="cover" nativeControls={false} />;
+  return <VideoView player={player} style={style} contentFit={fit} nativeControls={false} />;
 }

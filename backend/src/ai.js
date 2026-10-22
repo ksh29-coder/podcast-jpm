@@ -64,7 +64,7 @@ Return JSON with exactly these keys:
       });
     },
 
-    // Details for a Short someone is posting, and a check for the reviewing host.
+    // Details for a Short or episode someone is posting, and a check for the reviewing host.
     async shortSuggestions({ durationSec, cues }) {
       const lines = cues.map((c) => `[${Math.floor(c.startSec)}s] ${c.text}`).join('\n');
       return ask({
@@ -72,7 +72,7 @@ Return JSON with exactly these keys:
         system:
           'You help people share short videos about AI and software-engineering best practices with colleagues in an internal app. ' +
           'Only use what is actually said in the transcript. Reply with one JSON object and nothing else.',
-        user: `A ${Math.round(durationSec)}-second vertical video. Transcript (each line starts with its time in seconds):
+        user: `A ${Math.round(durationSec)}-second video. Transcript (each line starts with its time in seconds):
 ${lines}
 
 Return JSON with exactly these keys:

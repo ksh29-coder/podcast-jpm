@@ -1,86 +1,34 @@
-import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Image, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { router, useFocusEffect } from 'expo-router';
-import { AiCheckLine } from '../../components/host/AiCheckLine';
+import { useState } from 'react';
+import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text } from 'react-native';
+import { router } from 'expo-router';
+import { CommentCard, ItemCard, ReviewCard } from '../../components/host/cards';
 import { useHost } from '../../components/host/HostGate';
-import { Icon } from '../../components/Icon';
 import { ui } from '../../components/host/ui';
+import { useHostData } from '../../components/host/useHostData';
 import { formatTime } from '../../lib/format';
-import { formatWhen, isScheduled, STATUS_LABEL, videoLabel, type HostComment, type HostEpisode, type HostShort, type Status } from '../../lib/host';
+import { isScheduled, videoLabel } from '../../lib/host';
 import { colors } from '../../theme';
 
-const isWeb = Platform.OS === 'web';
-
-// Everything hosts have made, drafts included, with publish controls.
+// Host mode on the phone: review what people post (approve or reject), and
+// take things down. Uploading is the ＋ tab; editing and uploading episodes
+// is the Host Studio on the website.
 export default function HostHome() {
-  const { api, lock } = useHost();
-  const [episodes, setEpisodes] = useState<HostEpisode[] | null>(null);
-  const [shorts, setShorts] = useState<HostShort[] | null>(null);
-  const [comments, setComments] = useState<HostComment[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const { lock } = useHost();
+  const { episodes, shorts, comments, error, busyId, load, toReview, setStatus, reviewComment } = useHostData();
   const [refreshing, setRefreshing] = useState(false);
-  const [busyId, setBusyId] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    try {
-      const [eps, shs, cms] = await Promise.all([api.episodes(), api.shorts(), api.comments()]);
-      setEpisodes(eps);
-      setShorts(shs);
-      setComments(cms);
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  }, [api]);
-
-  // Reload whenever the screen comes back into view, e.g. after an upload.
-  useFocusEffect(
-    useCallback(() => {
-      load();
-    }, [load])
-  );
-
-  // Keep checking while anything is still uploading or processing.
-  const stillWorking = (v: HostEpisode['video'], needsAudio: boolean) => !!v && v.status !== 'errored' && !!videoLabel(v, { needsAudio });
-  const pending = !!episodes?.some((e) => stillWorking(e.video, true)) || !!shorts?.some((s) => stillWorking(s.video, false));
-  useEffect(() => {
-    if (!pending) return;
-    const t = setInterval(load, 5000);
-    return () => clearInterval(t);
-  }, [pending, load]);
-
-  const setStatus = async (kind: 'episode' | 'short', id: string, status: Status) => {
-    setBusyId(id);
-    try {
-      if (kind === 'episode') await api.updateEpisode(id, { status });
-      else await api.updateShort(id, { status });
-      await load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusyId(null);
-    }
-  };
-
-  const review = async (id: string, status: 'approved' | 'rejected') => {
-    setBusyId(id);
-    try {
-      await api.setCommentStatus(id, status);
-      setComments((cs) => cs.filter((c) => c.id !== id));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusyId(null);
-    }
-  };
 
   if (!episodes || !shorts) {
     return error ? <Text style={[ui.error, { padding: 20 }]}>{error}</Text> : <ActivityIndicator style={{ flex: 1 }} color={colors.accent} />;
   }
 
-  // Posted from the app and waiting for a host; everything else is below.
-  const toReview = shorts.filter((s) => s.author && s.status === 'in_review');
-  const otherShorts = shorts.filter((s) => !toReview.includes(s));
+  const live = [
+    ...episodes.filter((e) => e.status === 'published').map((e) => ({ kind: 'episode' as const, item: e })),
+    ...shorts.filter((s) => s.status === 'published').map((s) => ({ kind: 'short' as const, item: s })),
+  ];
+  const hidden = [
+    ...episodes.filter((e) => e.status === 'draft' || e.status === 'rejected').map((e) => ({ kind: 'episode' as const, item: e })),
+    ...shorts.filter((s) => s.status === 'draft' || s.status === 'rejected').map((s) => ({ kind: 'short' as const, item: s })),
+  ];
 
   return (
     <ScrollView
@@ -97,233 +45,66 @@ export default function HostHome() {
         />
       }
     >
-      <View style={ui.row}>
-        {isWeb ? (
-          <>
-            <Pressable style={ui.button} onPress={() => router.push('/host/upload-episode')}>
-              <Text style={ui.buttonText}>Upload episode</Text>
-            </Pressable>
-            <Pressable style={[ui.button, styles.record]} onPress={() => router.push('/host/record')}>
-              <Icon name="video" size={18} color={colors.accentText} />
-              <Text style={ui.buttonText}>Record a Short</Text>
-            </Pressable>
-          </>
-        ) : (
-          <>
-            <Pressable style={[ui.button, styles.record]} onPress={() => router.push('/host/record?next=upload')}>
-              <Icon name="video" size={18} color={colors.accentText} />
-              <Text style={ui.buttonText}>Record a Short</Text>
-            </Pressable>
-            <Pressable style={[ui.button, ui.secondary]} onPress={() => router.push('/host/upload-short')}>
-              <Text style={ui.secondaryText}>Upload from library</Text>
-            </Pressable>
-          </>
-        )}
-        <Pressable style={[ui.button, ui.secondary]} onPress={lock}>
-          <Text style={ui.secondaryText}>Lock host mode</Text>
-        </Pressable>
-      </View>
-      <Text style={ui.hint}>
-        {isWeb
-          ? 'Upload long episodes, cut Shorts from them, or record a Short with your camera or screen. Shorts filmed on a phone are uploaded from the phone app.'
-          : 'Upload Shorts from your phone here. Long episodes are uploaded, and Shorts cut from them, on the host website.'}
-      </Text>
       {error && <Text style={ui.error}>{error}</Text>}
 
-      {toReview.length > 0 && (
-        <>
-          <Text style={ui.section}>Shorts to review ({toReview.length})</Text>
-          <Text style={ui.hint}>Posted from the app. Nobody else sees them until you approve them.</Text>
-          {toReview.map((s) => (
-            <Pressable key={s.id} style={[ui.card, styles.card]} onPress={() => router.push(`/host/review/${s.id}`)} accessibilityRole="button">
-              {s.artworkUrl && !videoLabel(s.video) ? <Image source={{ uri: s.artworkUrl }} style={styles.thumb} /> : <View style={styles.thumb} />}
-              <View style={styles.body}>
-                <Text style={styles.title} numberOfLines={2}>
-                  {s.title}
-                </Text>
-                <Text style={ui.hint}>
-                  by {s.author?.name} · {formatWhen(s.createdAt)}
-                </Text>
-                <AiCheckLine check={s.aiCheck} />
-                {videoLabel(s.video) && <Text style={ui.hint}>{videoLabel(s.video)}</Text>}
-              </View>
-            </Pressable>
-          ))}
-        </>
+      <Text style={[ui.section, { marginTop: 0 }]}>To review{toReview.length ? ` (${toReview.length})` : ''}</Text>
+      {toReview.length === 0 ? (
+        <Text style={ui.hint}>Nothing waiting. New posts from the app and website show up here.</Text>
+      ) : (
+        toReview.map((item) => (
+          <ReviewCard key={item.id} item={item} progress={videoLabel(item.video, { needsAudio: item.id.startsWith('ep_') })} onOpen={() => router.push(`/host/review/${item.id}`)} />
+        ))
       )}
 
       {comments.length > 0 && (
         <>
           <Text style={ui.section}>Comments to review ({comments.length})</Text>
-          <Text style={ui.hint}>Viewers only see comments you approve. Reported comments come back here, hidden.</Text>
           {comments.map((c) => (
-            <View key={c.id} style={ui.card}>
-              <Text style={ui.hint}>
-                {c.authorName} on “{c.itemTitle ?? c.itemId}”{c.atSec != null ? ` at ${formatTime(c.atSec)}` : ''}
-              </Text>
-              <Text style={styles.title}>{c.body}</Text>
-              {c.reports.length > 0 && (
-                <Text style={[ui.hint, { color: colors.danger }]}>
-                  Reported {c.reports.length === 1 ? 'once' : `${c.reports.length} times`}
-                  {c.reports.some(Boolean) ? `: ${c.reports.filter(Boolean).join('; ')}` : ''}. Hidden until you approve it again.
-                </Text>
-              )}
-              <View style={ui.row}>
-                <Pressable style={[ui.button, busyId === c.id && ui.buttonDisabled]} disabled={busyId === c.id} onPress={() => review(c.id, 'approved')}>
-                  <Text style={ui.buttonText}>Approve</Text>
-                </Pressable>
-                <Pressable style={[ui.button, ui.secondary, busyId === c.id && ui.buttonDisabled]} disabled={busyId === c.id} onPress={() => review(c.id, 'rejected')}>
-                  <Text style={ui.secondaryText}>Reject</Text>
-                </Pressable>
-              </View>
-            </View>
+            <CommentCard key={c.id} comment={c} busy={busyId === c.id} onReview={(s) => reviewComment(c.id, s)} />
           ))}
         </>
       )}
 
-      <Text style={ui.section}>Episodes</Text>
-      {episodes.map((ep) => (
+      <Text style={ui.section}>Live</Text>
+      <Text style={ui.hint}>Take something down with Unpublish; it stays in Host mode and can go live again.</Text>
+      {live.map(({ kind, item }) => (
         <ItemCard
-          key={ep.id}
-          title={ep.title}
-          imageUrl={ep.artworkUrl}
-          meta={[ep.durationSec ? formatTime(ep.durationSec) : null, ep.tags.map((t) => `#${t}`).join(' ') || null].filter(Boolean).join(' · ') || null}
-          counts={ep}
-          status={ep.status}
-          scheduledFor={isScheduled(ep) ? ep.publishedAt : null}
-          onEdit={() => router.push(`/host/episode/${ep.id}`)}
-          progress={videoLabel(ep.video, { needsAudio: true })}
-          busy={busyId === ep.id}
-          onStatus={(s) => setStatus('episode', ep.id, s)}
-          extra={
-            <>
-              {isWeb && !(ep.video && ep.video.status !== 'ready') && (
-                <Pressable style={[ui.button, ui.secondary]} onPress={() => router.push(`/host/clip/${ep.id}`)}>
-                  <Text style={ui.secondaryText}>Make a Short</Text>
-                </Pressable>
-              )}
-              {ep.video?.status === 'ready' && (
-                <Pressable style={[ui.button, ui.secondary]} onPress={() => router.push(`/host/ai/${ep.id}`)}>
-                  <Text style={ui.secondaryText}>{ep.ai ? 'AI suggestions' : 'AI assist'}</Text>
-                </Pressable>
-              )}
-            </>
-          }
+          key={item.id}
+          title={item.title}
+          imageUrl={item.artworkUrl}
+          meta={[kind === 'episode' ? `Episode · ${formatTime(item.durationSec)}` : 'Short', item.author ? `by ${item.author.name}` : null].filter(Boolean).join(' · ')}
+          counts={item}
+          status={item.status}
+          scheduledFor={isScheduled(item) ? item.publishedAt : null}
+          progress={null}
+          busy={busyId === item.id}
+          onStatus={(s) => setStatus(kind, item.id, s)}
         />
       ))}
 
-      <Text style={ui.section}>Shorts</Text>
-      {otherShorts.length === 0 && <Text style={ui.hint}>No Shorts yet.</Text>}
-      {otherShorts.map((s) => (
-        <ItemCard
-          key={s.id}
-          title={s.title}
-          imageUrl={s.artworkUrl}
-          meta={[
-            s.author ? `by ${s.author.name}` : s.episodeTitle ? `From “${s.episodeTitle}”` : 'Uploaded',
-            s.startSec != null && s.endSec != null ? `${formatTime(s.startSec)}–${formatTime(s.endSec)}` : null,
-            s.tags.map((t) => `#${t}`).join(' ') || null,
-          ]
-            .filter(Boolean)
-            .join(' · ')}
-          counts={s}
-          status={s.status}
-          scheduledFor={isScheduled(s) ? s.publishedAt : null}
-          onEdit={() => router.push(`/host/short/${s.id}`)}
-          progress={videoLabel(s.video)}
-          busy={busyId === s.id}
-          onStatus={(st) => setStatus('short', s.id, st)}
-        />
-      ))}
+      {hidden.length > 0 && (
+        <>
+          <Text style={ui.section}>Not live</Text>
+          {hidden.map(({ kind, item }) => (
+            <ItemCard
+              key={item.id}
+              title={item.title}
+              imageUrl={item.artworkUrl}
+              meta={[kind === 'episode' ? 'Episode' : 'Short', item.author ? `by ${item.author.name}` : null].filter(Boolean).join(' · ')}
+              counts={item}
+              status={item.status}
+              scheduledFor={null}
+              progress={videoLabel(item.video, { needsAudio: kind === 'episode' })}
+              busy={busyId === item.id}
+              onStatus={(s) => setStatus(kind, item.id, s)}
+            />
+          ))}
+        </>
+      )}
+
+      <Pressable style={[ui.button, ui.secondary, { alignSelf: 'flex-start', marginTop: 24 }]} onPress={lock}>
+        <Text style={ui.secondaryText}>Lock host mode</Text>
+      </Pressable>
     </ScrollView>
   );
 }
-
-function ItemCard({
-  title,
-  imageUrl,
-  meta,
-  counts,
-  status,
-  scheduledFor,
-  onEdit,
-  progress,
-  busy,
-  onStatus,
-  extra,
-}: {
-  title: string;
-  imageUrl: string | null;
-  meta: string | null;
-  counts: { likes: number; views: number; comments: number };
-  status: Status;
-  scheduledFor: string | null;
-  onEdit: () => void;
-  progress: string | null;
-  busy: boolean;
-  onStatus: (s: Status) => void;
-  extra?: React.ReactNode;
-}) {
-  const failed = progress?.startsWith('Failed');
-  // Not ready to go live until the video (and an episode's audio) is ready.
-  const canPublish = !progress;
-  return (
-    <View style={[ui.card, styles.card]}>
-      {imageUrl ? <Image source={{ uri: imageUrl }} style={styles.thumb} /> : <View style={styles.thumb} />}
-      <View style={styles.body}>
-        <Text style={styles.title} numberOfLines={2}>
-          {title}
-        </Text>
-        {meta ? <Text style={ui.hint}>{meta}</Text> : null}
-        <Text style={ui.hint}>
-          {counts.views} views · {counts.likes} likes · {counts.comments} comments
-        </Text>
-        <View style={ui.row}>
-          <Text style={[styles.chip, status === 'published' && !scheduledFor && styles.chipLive]}>
-            {scheduledFor ? `Scheduled · ${formatWhen(scheduledFor)}` : STATUS_LABEL[status]}
-          </Text>
-          {progress && <Text style={[ui.hint, failed && ui.error]}>{progress}</Text>}
-        </View>
-        <View style={[ui.row, { marginTop: 4 }]}>
-          {status === 'published' ? (
-            <Pressable style={[ui.button, ui.secondary, busy && ui.buttonDisabled]} disabled={busy} onPress={() => onStatus('draft')}>
-              <Text style={ui.secondaryText}>{scheduledFor ? 'Cancel schedule' : 'Unpublish'}</Text>
-            </Pressable>
-          ) : (
-            <Pressable style={[ui.button, (busy || !canPublish) && ui.buttonDisabled]} disabled={busy || !canPublish} onPress={() => onStatus('published')}>
-              <Text style={ui.buttonText}>Publish</Text>
-            </Pressable>
-          )}
-          {status === 'in_review' && (
-            <Pressable style={[ui.button, ui.secondary, busy && ui.buttonDisabled]} disabled={busy} onPress={() => onStatus('rejected')}>
-              <Text style={ui.secondaryText}>Reject</Text>
-            </Pressable>
-          )}
-          <Pressable style={[ui.button, ui.secondary]} onPress={onEdit}>
-            <Text style={ui.secondaryText}>Edit</Text>
-          </Pressable>
-          {extra}
-        </View>
-      </View>
-    </View>
-  );
-}
-
-const styles = StyleSheet.create({
-  record: { flexDirection: 'row', gap: 8 },
-  card: { flexDirection: 'row', gap: 12 },
-  thumb: { width: 72, height: 72, borderRadius: 8, backgroundColor: colors.cardHigh },
-  body: { flex: 1, gap: 4 },
-  title: { color: colors.text, fontSize: 16, fontWeight: '700' },
-  chip: {
-    color: colors.textMuted,
-    backgroundColor: colors.cardHigh,
-    borderRadius: 10,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    fontSize: 12,
-    fontWeight: '700',
-    overflow: 'hidden',
-  },
-  chipLive: { color: colors.accentText, backgroundColor: colors.accent },
-});

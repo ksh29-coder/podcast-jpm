@@ -41,8 +41,19 @@ type HostFields = { status: Status; video: VideoState | null; createdAt: string;
 
 // Of everyone who started an episode, how many reached each tenth of it.
 export type Reach = { listeners: number; durationSec: number; points: { percent: number; atSec: number; listeners: number; share: number }[] };
+// The AI's check of what's said in something posted from the app or website.
+export type AiCheck = { status: 'none' | 'generating' | 'ready' | 'unavailable'; concerns: string[] } | null;
+
 export type HostEpisode = Omit<Episode, 'clips'> &
-  HostFields & { thumbnailSec?: number; ai?: AiSuggestions | null; speakers?: Record<string, string>; transcriptSpeakers?: string[]; clips: HostShort[] };
+  HostFields & {
+    thumbnailSec?: number;
+    ai?: AiSuggestions | null;
+    speakers?: Record<string, string>;
+    transcriptSpeakers?: string[];
+    clips: HostShort[];
+    reviewNote?: string | null;
+    aiCheck?: AiCheck;
+  };
 export type HostShort = Clip &
   HostFields &
   Stats & {
@@ -54,8 +65,7 @@ export type HostShort = Clip &
     author: { name: string } | null;
     coverSec: number | null;
     reviewNote: string | null;
-    // The AI's check of what's said, for posted Shorts.
-    aiCheck: { status: 'none' | 'generating' | 'ready' | 'unavailable'; concerns: string[] } | null;
+    aiCheck: AiCheck;
   };
 
 export const MAX_SHORT_SEC = 90;
@@ -113,6 +123,7 @@ export function hostApi(passcode: string) {
         mentions: Mention[];
         speakers: Record<string, string>;
         publishAt: string;
+        reviewNote: string | null;
       }>
     ) =>
       call<HostEpisode>('PATCH', `/episodes/${id}`, body),

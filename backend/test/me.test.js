@@ -228,6 +228,40 @@ test('rejected Shorts and never-posted uploads are deleted after a week', async 
   assert.strictEqual((await alice('GET', `/api/me/uploads/${recentUp.body.videoId}`)).status, 200);
 });
 
+test('anyone can post an episode too; it waits for review', async () => {
+  video.state.durationSec = 900;
+  assert.strictEqual((await alice('POST', '/api/me/uploads', { kind: 'episode', startSec: 0, endSec: 60 })).status, 400);
+  const up = await alice('POST', '/api/me/uploads', { kind: 'episode' });
+  assert.strictEqual(up.status, 201);
+  // Episodes get an audio-only file for listening, and captions.
+  assert.deepStrictEqual(video.state.calls.at(-1), ['createUpload', { audio: true, captions: true }]);
+  const state = (await alice('GET', `/api/me/uploads/${up.body.videoId}`)).body;
+  assert.deepStrictEqual([state.status, state.suggestions.status], ['ready', 'ready']);
+  // It can't be posted as a Short.
+  assert.strictEqual((await alice('POST', '/api/me/shorts', { videoId: up.body.videoId, title: 'x' })).status, 404);
+
+  const posted = await alice('POST', '/api/me/episodes', { videoId: up.body.videoId, title: 'Agents in practice', description: 'Long form', tags: ['agents'], coverSec: 30 });
+  assert.strictEqual(posted.status, 201);
+  assert.deepStrictEqual([posted.body.status, posted.body.author.name], ['in_review', 'Alice K']);
+  assert.match(posted.body.artworkUrl, /time=30/);
+  assert.ok(!(await bob('GET', '/api/episodes')).body.some((e) => e.id === posted.body.id));
+
+  assert.strictEqual((await alice('PATCH', `/api/me/episodes/${posted.body.id}`, { title: 'Agents, in practice' })).body.title, 'Agents, in practice');
+  assert.strictEqual((await bob('PATCH', `/api/me/episodes/${posted.body.id}`, { title: 'x' })).status, 404);
+
+  const queued = (await host('GET', '/episodes')).body.find((e) => e.id === posted.body.id);
+  assert.deepStrictEqual([queued.status, queued.author.name, queued.aiCheck.concerns], ['in_review', 'Alice K', ['0:04 names a client']]);
+  await host('PATCH', `/episodes/${posted.body.id}`, { status: 'rejected', reviewNote: 'Trim the intro' });
+  assert.strictEqual((await alice('GET', '/api/me/episodes')).body[0].reviewNote, 'Trim the intro');
+  await host('PATCH', `/episodes/${posted.body.id}`, { status: 'published' });
+  const live = (await bob('GET', `/api/episodes/${posted.body.id}`)).body;
+  assert.deepStrictEqual([live.author.name, live.title], ['Alice K', 'Agents, in practice']);
+  assert.strictEqual((await alice('GET', '/api/me/episodes')).body[0].reviewNote, null);
+
+  assert.strictEqual((await alice('DELETE', `/api/me/episodes/${posted.body.id}`)).status, 204);
+  assert.strictEqual((await bob('GET', `/api/episodes/${posted.body.id}`)).status, 404);
+});
+
 test('the host’s own Shorts have no author', async () => {
   video.state.durationSec = 30;
   const up = await host('POST', '/uploads', { kind: 'short' });

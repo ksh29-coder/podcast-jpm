@@ -1,6 +1,6 @@
 import * as ImagePicker from 'expo-image-picker';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, View } from 'react-native';
+import { ActivityIndicator, Alert, Platform, View } from 'react-native';
 import { router } from 'expo-router';
 import { ErrorState } from '../../components/ErrorState';
 import { ShortRecorder } from '../../components/host/ShortRecorder';
@@ -15,6 +15,12 @@ const MAX_SOURCE_SEC = 600;
 // ＋: the camera, with a button to choose a video instead. The first time,
 // a name and the guidelines come first.
 export default function PostCamera() {
+  // The website posts from a file on the New page instead. (No redirect: this
+  // screen also sits, unseen, under the trim and details screens.)
+  return Platform.OS === 'web' ? null : <Camera />;
+}
+
+function Camera() {
   const { setPicked } = usePost();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -52,7 +58,7 @@ export default function PostCamera() {
       Alert.alert('That video is too long', 'Choose a video of up to 10 minutes, then pick the part to keep.');
       return;
     }
-    setPicked({ uri: asset.uri, durationSec });
+    setPicked({ uri: asset.uri, durationSec, kind: 'short' });
     router.push('/post/preview');
   };
 
@@ -60,7 +66,7 @@ export default function PostCamera() {
     <View style={{ flex: 1, backgroundColor: '#000' }}>
       <ShortRecorder
         onRecorded={(rec) => {
-          setPicked(rec);
+          setPicked({ ...rec, kind: 'short' });
           router.push('/post/preview');
         }}
         onPickFromLibrary={pick}

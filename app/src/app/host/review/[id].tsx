@@ -6,15 +6,17 @@ import { useHost } from '../../../components/host/HostGate';
 import { ui } from '../../../components/host/ui';
 import { TagsField } from '../../../components/post/TagsField';
 import { ShortVideo } from '../../../components/ShortVideo';
-import { formatWhen, videoLabel, type HostShort } from '../../../lib/host';
+import { formatWhen, videoLabel, type HostEpisode, type HostShort } from '../../../lib/host';
 import { colors, radius, spacing } from '../../../theme';
 
-// Review a Short someone posted: watch it, fix the details if needed, then
-// approve it (it goes live) or reject it with an optional note for them.
+// Review a Short or episode someone posted: watch it, fix the details if
+// needed, then approve it (it goes live) or reject it with an optional note
+// for them. Episode ids start with "ep_".
 export default function ReviewShort() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { api } = useHost();
-  const [short, setShort] = useState<HostShort | null>(null);
+  const isEpisode = id.startsWith('ep_');
+  const [short, setShort] = useState<HostShort | HostEpisode | null>(null);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [tags, setTags] = useState<string[]>([]);
@@ -24,9 +26,9 @@ export default function ReviewShort() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // There's no single-Short endpoint; the host list is small.
-    api.shorts().then(
-      (all) => {
+    // There's no single-Short endpoint; the host lists are small.
+    (isEpisode ? api.episodes() : api.shorts()).then(
+      (all: (HostShort | HostEpisode)[]) => {
         const s = all.find((x) => x.id === id);
         if (!s) return setError('Short not found');
         setShort(s);
@@ -36,16 +38,16 @@ export default function ReviewShort() {
       },
       (e) => setError(e instanceof Error ? e.message : String(e))
     );
-  }, [api, id]);
+  }, [api, id, isEpisode]);
 
   if (!short) return error ? <Text style={[ui.error, { padding: spacing.xl }]}>{error}</Text> : <ActivityIndicator style={{ flex: 1 }} color={colors.text} />;
 
-  const processing = videoLabel(short.video);
-  const decide = async (change: Parameters<typeof api.updateShort>[1]) => {
+  const processing = videoLabel(short.video, { needsAudio: isEpisode });
+  const decide = async (change: Parameters<typeof api.updateShort>[1] & Parameters<typeof api.updateEpisode>[1]) => {
     setBusy(true);
     setError(null);
     try {
-      await api.updateShort(short.id, change);
+      await (isEpisode ? api.updateEpisode(short.id, change) : api.updateShort(short.id, change));
       router.back();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -55,15 +57,15 @@ export default function ReviewShort() {
 
   return (
     <ScrollView contentContainerStyle={ui.page} keyboardShouldPersistTaps="handled">
-      <View style={styles.player}>
+      <View style={[styles.player, isEpisode && styles.playerWide]}>
         {processing ? (
           <Text style={[ui.hint, { textAlign: 'center' }]}>{processing}</Text>
         ) : (
-          <ShortVideo uri={short.videoUrl} playing style={StyleSheet.absoluteFill} focusX={short.focusX} onTime={() => {}} />
+          <ShortVideo uri={short.videoUrl} playing style={StyleSheet.absoluteFill} focusX={'focusX' in short ? short.focusX : 0.5} fit={isEpisode ? 'contain' : 'cover'} onTime={() => {}} />
         )}
       </View>
       <Text style={ui.hint}>
-        Posted by {short.author?.name ?? 'a host'} · {formatWhen(short.createdAt)}
+        {isEpisode ? 'Episode' : 'Short'} posted by {short.author?.name ?? 'a host'} · {formatWhen(short.createdAt)}
       </Text>
       <View style={ui.card}>
         <AiCheckLine check={short.aiCheck} />
@@ -121,5 +123,6 @@ export default function ReviewShort() {
 
 const styles = StyleSheet.create({
   player: { width: '100%', maxWidth: 320, aspectRatio: 9 / 16, alignSelf: 'center', borderRadius: radius.lg, overflow: 'hidden', backgroundColor: '#000', justifyContent: 'center' },
+  playerWide: { maxWidth: 820, aspectRatio: 16 / 9 },
   danger: { backgroundColor: colors.danger },
 });

@@ -1,7 +1,7 @@
 import { Pressable } from 'react-native';
 import { router, Stack } from 'expo-router';
 import { Icon } from '../../../components/Icon';
-import { stackHeader } from '../../../theme/navigation';
+import { stackHeader, tabRootOptions } from '../../../theme/navigation';
 
 export default function HomeLayout() {
   return (
@@ -10,11 +10,13 @@ export default function HomeLayout() {
         name="index"
         options={{
           title: 'AI Dev Wave',
+          // Reviewing what people post, for hosts.
           headerRight: () => (
             <Pressable onPress={() => router.push('/host')} accessibilityRole="button" accessibilityLabel="Host mode" hitSlop={10}>
-              <Icon name="upload" size={20} />
+              <Icon name="shield" size={21} />
             </Pressable>
           ),
+          ...tabRootOptions,
         }}
       />
     </Stack>

@@ -8,7 +8,9 @@ Expo (React Native) app for iPhone and Android: build step 2–4 of the project 
 - **＋ (New)**: anyone can post a Short. Record with the camera or choose a video (Upload, bottom left),
   trim it to 90 seconds, then add details while it uploads; AI suggests the title, description, tags
   and cover from what's said. It waits for a host to approve it (Host mode → Shorts to review).
-- **Me**: your name, your Shorts with their review status (In review, Live with stats, Not approved
+- **Host mode** (shield button on Episodes): review what people post (approve, or reject with a
+  note) and take things down. Uploading episodes and editing is in the website's Host Studio.
+- **Me**: your name, your Shorts and episodes with their review status (In review, Live with stats, Not approved
   with the host's note), and **Downloads**: an episode's audio saved for offline listening
   (not available in the web preview).
 - One shared audio player: keeps playing while you browse, with the screen locked, with lock-screen
@@ -29,9 +31,15 @@ Expo (React Native) app for iPhone and Android: build step 2–4 of the project 
 4. Scan the QR code with the iPhone camera. The phone and computer must be on the same Wi-Fi
    (or use `npx expo start --tunnel`).
 
-## Web preview
+## Website
 
-`npx expo start --web` runs the same app in a browser, with the backend at `http://localhost:3000`
+The same app on the web, laid out for a computer: a sidebar (Home, Shorts, Search, Me), a Home page
+with the newest episode and grids, a centred Shorts player (arrow keys or the mouse wheel to move), a
+two-column episode page, and **New**, where anyone can post a Short (trimmed to 90 seconds) or a
+whole episode from a video file. `/host` is the **Host Studio**: Review, Episodes, Shorts, and
+uploading. Narrow windows get a bottom bar instead of the sidebar.
+
+`npx expo start --web` runs it locally, with the backend at `http://localhost:3000`
 by default.
 
 ## Checks

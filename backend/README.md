@@ -23,14 +23,15 @@ npm test
 | GET | `/api/progress` | The user's saved positions, keyed by episode id |
 | PUT | `/api/progress/:episodeId` | Body `{ "positionSec": 42 }`; saves the position so playback resumes on another device |
 | GET/PUT | `/api/me` | Your name and whether you've agreed to the posting guidelines |
-| POST | `/api/me/uploads` | Upload URL for a Short; optional `{ startSec, endSec }` keeps only that part (cut by the video service) |
+| POST | `/api/me/uploads` | Upload URL. `{ kind: "short" }` (default) can keep only `{ startSec, endSec }` (cut by the video service); `{ kind: "episode" }` is kept whole |
 | GET/DELETE | `/api/me/uploads/:videoId` | Processing state, AI suggestions and cover frames; or throw an unposted upload away |
 | GET/POST | `/api/me/shorts` | Your Shorts with review status; post one (it waits `in_review` for a host) |
 | PATCH/DELETE | `/api/me/shorts/:id` | Edit while in review; delete any time |
+| GET/POST, PATCH/DELETE | `/api/me/episodes`, `/api/me/episodes/:id` | The same for episodes (posted from the website) |
 | * | `/api/host/*` | Host mode (passcode): uploads, publishing, the review queue for posted Shorts and comments |
 | GET | `/media/*` | Media files, with HTTP Range support for seeking |
 
-Rejected Shorts and uploads nobody posted are deleted, with their videos, after 7 days.
+Rejected Shorts and episodes, and uploads nobody posted, are deleted with their videos after 7 days.
 
 Media paths in `data/episodes.json` are server-relative; the API returns them as absolute URLs
 (based on the request host, or `PUBLIC_BASE_URL` if set, e.g. behind a gateway).

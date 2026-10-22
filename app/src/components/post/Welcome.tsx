@@ -94,7 +94,7 @@ export function Welcome({ profile, onDone }: { profile: Profile; onDone: (p: Pro
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
-  page: { paddingHorizontal: spacing.xl, gap: spacing.md },
+  page: { paddingHorizontal: spacing.xl, gap: spacing.md, width: '100%', maxWidth: 600, alignSelf: 'center' },
   close: { alignSelf: 'flex-end', padding: spacing.xs },
   section: { marginTop: spacing.lg },
   input: {

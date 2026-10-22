@@ -1,14 +1,15 @@
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Image, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { router, Stack } from 'expo-router';
 import { EpisodeRow } from '../../../components/EpisodeRow';
+import { Icon } from '../../../components/Icon';
 import { api, type SearchResults } from '../../../lib/api';
 import { formatTime } from '../../../lib/format';
 import { usePlayer } from '../../../lib/player';
 import { colors, radius, spacing, type } from '../../../theme';
 
 // Search episodes, Shorts and what was said in them (transcripts), from the
-// iOS 26 search tab.
+// iOS 26 search tab, or a search box at the top of the page on the website.
 export default function SearchScreen() {
   const { progress } = usePlayer();
   const [query, setQuery] = useState('');
@@ -37,15 +38,31 @@ export default function SearchScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: 'Search' }} />
-      <Stack.SearchBar
-        placement="automatic"
-        placeholder="Episodes, Shorts, things people said"
-        onChangeText={(e) => setQuery(e.nativeEvent.text)}
-        textColor={colors.text}
-        tintColor={colors.text}
-      />
-      <ScrollView contentInsetAdjustmentBehavior="automatic" keyboardShouldPersistTaps="handled" style={{ backgroundColor: colors.bg }} contentContainerStyle={styles.page}>
+      <Stack.Screen options={{ title: 'Search', headerShown: !web }} />
+      {!web && (
+        <Stack.SearchBar
+          placement="automatic"
+          placeholder="Episodes, Shorts, things people said"
+          onChangeText={(e) => setQuery(e.nativeEvent.text)}
+          textColor={colors.text}
+          tintColor={colors.text}
+        />
+      )}
+      <ScrollView contentInsetAdjustmentBehavior="automatic" keyboardShouldPersistTaps="handled" style={{ backgroundColor: colors.bg }} contentContainerStyle={[styles.page, web && styles.pageWeb]}>
+        {web && (
+          <View style={styles.webBox}>
+            <Icon name="search" size={20} color={colors.textMuted} />
+            <TextInput
+              style={styles.webInput}
+              value={query}
+              onChangeText={setQuery}
+              autoFocus
+              placeholder="Search episodes, Shorts, and things people said"
+              placeholderTextColor={colors.textFaint}
+              accessibilityLabel="Search"
+            />
+          </View>
+        )}
         {q.length < 2 && <Text style={[type.subhead, styles.hint]}>Search titles, tags, and everything said in episodes.</Text>}
         {loading && <ActivityIndicator color={colors.text} style={{ marginTop: spacing.xxxl }} />}
         {error && <Text style={[type.subhead, styles.hint, { color: colors.danger }]}>Search failed: {error}</Text>}
@@ -89,7 +106,12 @@ export default function SearchScreen() {
               <Pressable
                 key={s.id}
                 onPress={() =>
-                  s.episodeId ? router.push(s.startSec != null ? `/episode/${s.episodeId}?t=${s.startSec}` : `/episode/${s.episodeId}`) : router.push('/shorts')
+                  // The website's Shorts page can open on this one.
+                  web
+                    ? router.push(`/shorts?id=${s.id}`)
+                    : s.episodeId
+                      ? router.push(s.startSec != null ? `/episode/${s.episodeId}?t=${s.startSec}` : `/episode/${s.episodeId}`)
+                      : router.push('/shorts')
                 }
                 style={({ pressed }) => [styles.short, pressed && { backgroundColor: colors.card }]}
                 accessibilityRole="button"
@@ -110,6 +132,8 @@ export default function SearchScreen() {
   );
 }
 
+const web = Platform.OS === 'web';
+
 // The matching part of a line, in the highlight color.
 function Highlighted({ text, q }: { text: string; q: string }) {
   const i = text.toLowerCase().indexOf(q.toLowerCase());
@@ -125,6 +149,21 @@ function Highlighted({ text, q }: { text: string; q: string }) {
 
 const styles = StyleSheet.create({
   page: { paddingBottom: spacing.huge },
+  pageWeb: { width: '100%', maxWidth: 900, alignSelf: 'center', paddingTop: spacing.xxxl },
+  webBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    marginHorizontal: spacing.xl,
+    paddingHorizontal: spacing.lg,
+    borderRadius: radius.full,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  // The rounded box around it shows focus; no browser outline inside it
+  // ('none' is web-only, so React Native's types don't list it).
+  webInput: { flex: 1, color: colors.text, fontSize: 17, paddingVertical: spacing.md, outlineStyle: 'none' as 'solid' },
   hint: { textAlign: 'center', paddingHorizontal: spacing.xxxl, paddingTop: spacing.xxxl },
   section: { paddingTop: spacing.lg },
   sectionTitle: { paddingHorizontal: spacing.xl, paddingBottom: spacing.sm },

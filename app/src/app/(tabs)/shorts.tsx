@@ -18,11 +18,14 @@ import { useFetch } from '../../lib/useFetch';
 export default function ShortsScreen() {
   const { data, error, reload } = useFetch(api.shorts);
   // Coming back after a while picks up Shorts approved since.
-  const loadedAt = useRef(Date.now());
+  const loadedAt = useRef(0);
   useFocusEffect(
     useCallback(() => {
-      if (Date.now() - loadedAt.current < 60_000) return;
-      loadedAt.current = Date.now();
+      const now = Date.now();
+      // The first focus is the first load.
+      if (!loadedAt.current) loadedAt.current = now;
+      if (now - loadedAt.current < 60_000) return;
+      loadedAt.current = now;
       reload();
     }, [reload])
   );

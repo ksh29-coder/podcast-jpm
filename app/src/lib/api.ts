@@ -31,6 +31,8 @@ export type Episode = {
   id: string;
   title: string;
   description: string;
+  // Who posted it; null for episodes made by hosts.
+  author: { name: string } | null;
   publishedAt: string;
   durationSec: number;
   artworkUrl: string;
@@ -81,6 +83,7 @@ export type UploadState = {
 };
 
 export type ShortStatus = 'draft' | 'in_review' | 'published' | 'rejected';
+export type PostKind = 'short' | 'episode';
 
 // One of this person's own Shorts, with where it is in review.
 export type MyShort = Short & {
@@ -94,6 +97,14 @@ export type MyShort = Short & {
 };
 
 export type ShortDetails = { title: string; description: string; tags: string[]; coverSec?: number };
+
+// One of this person's own episodes (posted from the website).
+export type MyEpisode = Episode & {
+  status: ShortStatus;
+  reviewNote: string | null;
+  video: { id: string; status: 'uploading' | 'processing' | 'ready' | 'errored'; error: string | null } | null;
+  createdAt: string;
+};
 
 export type Comment = {
   id: string;
@@ -166,9 +177,9 @@ export const api = {
     request<void>(`/api/items/${type}/${id}/comments/${commentId}/report`, { method: 'POST', body: JSON.stringify({ reason }) }),
   me: () => request<Profile>('/api/me'),
   saveMe: (name: string, acceptGuidelines?: boolean) => request<Profile>('/api/me', { method: 'PUT', body: JSON.stringify({ name, acceptGuidelines }) }),
-  // range: the part of the video to keep, when not all of it.
-  createUpload: (range?: { startSec: number; endSec: number }) =>
-    request<{ videoId: string; uploadUrl: string }>('/api/me/uploads', { method: 'POST', body: JSON.stringify(range ?? {}) }),
+  // range: the part of a Short's video to keep, when not all of it.
+  createUpload: (kind: PostKind, range?: { startSec: number; endSec: number }) =>
+    request<{ videoId: string; uploadUrl: string }>('/api/me/uploads', { method: 'POST', body: JSON.stringify({ kind, ...range }) }),
   upload: (videoId: string) => request<UploadState>(`/api/me/uploads/${videoId}`),
   discardUpload: (videoId: string) => request<void>(`/api/me/uploads/${videoId}`, { method: 'DELETE' }),
   myShorts: () => request<MyShort[]>('/api/me/shorts'),
@@ -176,6 +187,12 @@ export const api = {
     request<MyShort>('/api/me/shorts', { method: 'POST', body: JSON.stringify({ videoId, ...details }) }),
   updateMyShort: (id: string, details: Partial<ShortDetails>) => request<MyShort>(`/api/me/shorts/${id}`, { method: 'PATCH', body: JSON.stringify(details) }),
   deleteMyShort: (id: string) => request<void>(`/api/me/shorts/${id}`, { method: 'DELETE' }),
+  myEpisodes: () => request<MyEpisode[]>('/api/me/episodes'),
+  postEpisode: (videoId: string, details: ShortDetails) =>
+    request<MyEpisode>('/api/me/episodes', { method: 'POST', body: JSON.stringify({ videoId, ...details }) }),
+  updateMyEpisode: (id: string, details: Partial<ShortDetails>) =>
+    request<MyEpisode>(`/api/me/episodes/${id}`, { method: 'PATCH', body: JSON.stringify(details) }),
+  deleteMyEpisode: (id: string) => request<void>(`/api/me/episodes/${id}`, { method: 'DELETE' }),
   saveProgress: (episodeId: string, positionSec: number) =>
     request(`/api/progress/${episodeId}`, {
       method: 'PUT',

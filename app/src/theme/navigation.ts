@@ -15,3 +15,7 @@ export const stackHeader: NativeStackNavigationOptions = {
   headerStyle: { backgroundColor: process.env.EXPO_OS === 'ios' ? 'transparent' : colors.bg },
   contentStyle: { backgroundColor: colors.bg },
 };
+
+// The first screen of each tab: on the website the sidebar already says where
+// you are, so the page draws its own title instead of a header.
+export const tabRootOptions: NativeStackNavigationOptions = process.env.EXPO_OS === 'web' ? { headerShown: false } : {};

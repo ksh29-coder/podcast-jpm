@@ -9,12 +9,14 @@ type Props = {
   style: StyleProp<ViewStyle>;
   focusX: number;
   onTime: (position: number, duration: number) => void;
+  // 'contain' shows the whole frame (e.g. a wide episode in review).
+  fit?: 'cover' | 'contain';
   ref?: Ref<ShortVideoHandle>;
 };
 
 // Web version: a <video> with HLS support. The browser crops to fill
 // (object-fit) and focusX picks which part of a wide video stays in view.
-export function ShortVideo({ uri, playing, focusX, onTime, ref }: Props) {
+export function ShortVideo({ uri, playing, focusX, onTime, fit = 'cover', ref }: Props) {
   const video = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
@@ -47,7 +49,7 @@ export function ShortVideo({ uri, playing, focusX, onTime, ref }: Props) {
         loop
         playsInline
         onTimeUpdate={(e) => onTime(e.currentTarget.currentTime, e.currentTarget.duration || 0)}
-        style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: `${focusX * 100}% 50%`, background: '#000' }}
+        style={{ width: '100%', height: '100%', objectFit: fit, objectPosition: `${focusX * 100}% 50%`, background: '#000' }}
       />
     </View>
   );
