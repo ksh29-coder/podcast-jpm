@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import { ErrorState } from '../../components/ErrorState';
 import { Icon, type IconName } from '../../components/Icon';
@@ -68,8 +68,9 @@ export default function CreateWeb() {
           kind="short"
           icon="shorts"
           title="Short"
-          detail="A quick vertical clip, up to 90 seconds. You can trim it next."
+          detail="A quick vertical clip, up to 90 seconds. Record your camera or your screen, or choose a video; you can trim it next."
           onFile={(f) => choose('short', f)}
+          onRecord={() => router.push('/post/record')}
         />
         <DropZone
           kind="episode"
@@ -87,13 +88,26 @@ export default function CreateWeb() {
   );
 }
 
-// A card you can click to choose a file, or drop a file onto.
-function DropZone({ kind, icon, title, detail, onFile }: { kind: PostKind; icon: IconName; title: string; detail: string; onFile: (f: File) => void }) {
+// A card to choose a file (or drop one onto), and for Shorts to record one.
+function DropZone({
+  kind,
+  icon,
+  title,
+  detail,
+  onFile,
+  onRecord,
+}: {
+  kind: PostKind;
+  icon: IconName;
+  title: string;
+  detail: string;
+  onFile: (f: File) => void;
+  onRecord?: () => void;
+}) {
   const [over, setOver] = useState(false);
   const id = `file-${kind}`;
   return (
-    <label
-      htmlFor={id}
+    <div
       onDragOver={(e) => {
         e.preventDefault();
         setOver(true);
@@ -105,7 +119,7 @@ function DropZone({ kind, icon, title, detail, onFile }: { kind: PostKind; icon:
         const f = e.dataTransfer.files?.[0];
         if (f) onFile(f);
       }}
-      style={{ flex: 1, minWidth: 280, cursor: 'pointer', display: 'flex' }}
+      style={{ flex: 1, minWidth: 280, display: 'flex' }}
     >
       <View style={[styles.zone, over && styles.zoneOver]}>
         <View style={styles.zoneIcon}>
@@ -113,10 +127,20 @@ function DropZone({ kind, icon, title, detail, onFile }: { kind: PostKind; icon:
         </View>
         <Text style={type.title}>{title}</Text>
         <Text style={[type.subhead, { textAlign: 'center' }]}>{detail}</Text>
-        <View style={styles.zoneButton}>
-          <Text style={styles.zoneButtonText}>Choose a video</Text>
+        <View style={styles.zoneButtons}>
+          {onRecord && (
+            <Pressable onPress={onRecord} style={styles.zoneButton} accessibilityRole="button">
+              <Icon name="video" size={16} color={colors.accentText} />
+              <Text style={styles.zoneButtonText}>Record</Text>
+            </Pressable>
+          )}
+          <label htmlFor={id} style={{ cursor: 'pointer' }}>
+            <View style={[styles.zoneButton, onRecord && styles.zoneButtonSecondary]}>
+              <Text style={[styles.zoneButtonText, onRecord && { color: colors.text }]}>Choose a video</Text>
+            </View>
+          </label>
         </View>
-        <Text style={type.caption}>or drop it here</Text>
+        <Text style={type.caption}>or drop a file here</Text>
       </View>
       <input
         id={id}
@@ -129,7 +153,7 @@ function DropZone({ kind, icon, title, detail, onFile }: { kind: PostKind; icon:
           if (f) onFile(f);
         }}
       />
-    </label>
+    </div>
   );
 }
 
@@ -160,7 +184,9 @@ const styles = StyleSheet.create({
   },
   zoneOver: { borderColor: colors.highlight, backgroundColor: 'rgba(255,181,71,0.08)' },
   zoneIcon: { width: 64, height: 64, borderRadius: 32, backgroundColor: 'rgba(255,181,71,0.12)', alignItems: 'center', justifyContent: 'center' },
-  zoneButton: { marginTop: spacing.sm, paddingHorizontal: spacing.xl, paddingVertical: spacing.md, borderRadius: radius.full, backgroundColor: colors.accent },
+  zoneButtons: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: spacing.sm, marginTop: spacing.sm },
+  zoneButton: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingHorizontal: spacing.xl, paddingVertical: spacing.md, borderRadius: radius.full, backgroundColor: colors.accent },
+  zoneButtonSecondary: { backgroundColor: colors.cardHigh },
   zoneButtonText: { color: colors.accentText, fontWeight: '700', fontSize: 15 },
   error: { color: colors.danger, fontSize: 15 },
 });

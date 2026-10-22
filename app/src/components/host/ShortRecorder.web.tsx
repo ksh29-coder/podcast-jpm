@@ -77,8 +77,10 @@ function drawContain(ctx: CanvasRenderingContext2D, video: HTMLVideoElement) {
   ctx.drawImage(video, (W - w) / 2, (H - h) / 2, w, h);
 }
 
-export function ShortRecorder() {
-  const { api } = useHost();
+// `onRecorded`: what to do with a finished recording (the New page hands it
+// to the posting screens). Without it, as in the Host Studio, the recording
+// is uploaded and published from here.
+export function ShortRecorder({ onRecorded }: { onRecorded?: (r: { uri: string; durationSec: number; blob: Blob }) => void } = {}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const cameraVideo = useRef<HTMLVideoElement | null>(null);
   const screenVideo = useRef<HTMLVideoElement | null>(null);
@@ -303,7 +305,7 @@ export function ShortRecorder() {
   };
 
   if (stage === 'details' && result) {
-    return <Details api={api} result={result} onBack={() => setStage('review')} />;
+    return <Details result={result} onBack={() => setStage('review')} />;
   }
 
   const live = stage === 'ready' || stage === 'countdown' || stage === 'recording';
@@ -422,7 +424,14 @@ export function ShortRecorder() {
           <video src={result.url} controls playsInline style={{ alignSelf: 'center', height: 'min(70vh, 640px)', aspectRatio: '9 / 16', borderRadius: 16, background: '#000' }} />
           <Text style={ui.hint}>Length {formatTime(result.durationSec)}</Text>
           <View style={ui.row}>
-            <Pressable style={ui.button} onPress={() => setStage('details')}>
+            <Pressable
+              style={ui.button}
+              onPress={() => {
+                if (!onRecorded) return setStage('details');
+                stopSources();
+                onRecorded({ uri: result.url, durationSec: result.durationSec, blob: result.blob });
+              }}
+            >
               <Text style={ui.buttonText}>Use this recording</Text>
             </Pressable>
             <Pressable style={[ui.button, ui.secondary]} onPress={recordAgain}>
@@ -463,7 +472,8 @@ function Toggle({ on, label, onPress }: { on: boolean; label: string; onPress: (
 }
 
 // After recording: title, tags, related episode, then upload and publish.
-function Details({ api, result, onBack }: { api: ReturnType<typeof useHost>['api']; result: { blob: Blob; durationSec: number }; onBack: () => void }) {
+function Details({ result, onBack }: { result: { blob: Blob; durationSec: number }; onBack: () => void }) {
+  const { api } = useHost();
   const [title, setTitle] = useState('');
   const [tagsText, setTagsText] = useState('');
   const [episodes, setEpisodes] = useState<Episode[]>([]);
