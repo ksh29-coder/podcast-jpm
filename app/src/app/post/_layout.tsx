@@ -12,7 +12,7 @@ export default function PostLayout() {
       {/* The website's recorder, from the New page: a normal page with a Back button. */}
       <Stack.Screen
         name="record"
-        options={{ headerShown: true, title: 'Record a Short', headerBackTitle: 'Back', headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text, headerShadowVisible: false }}
+        options={{ headerShown: true, headerBackTitle: 'Back', headerStyle: { backgroundColor: colors.bg }, headerTintColor: colors.text, headerShadowVisible: false }}
       />
       {/* Reached with replace, once the upload has started, so there's no going back to trim. */}
       <Stack.Screen name="details" options={{ gestureEnabled: false }} />
