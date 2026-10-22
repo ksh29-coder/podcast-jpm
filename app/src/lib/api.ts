@@ -47,7 +47,53 @@ export type Episode = {
   clips: Clip[];
 } & Stats;
 
-export type Short = Clip & Stats & { episodeId: string | null; episodeTitle: string | null; artworkUrl: string | null };
+export type Short = Clip &
+  Stats & {
+    episodeId: string | null;
+    episodeTitle: string | null;
+    artworkUrl: string | null;
+    description: string;
+    // Who posted it; null for Shorts made by hosts.
+    author: { name: string } | null;
+  };
+
+// ---- Posting Shorts (anyone) ----
+
+export type Profile = { name: string | null; acceptedGuidelines: boolean; maxShortSec: number };
+
+// 'generating' while the AI reads what's said; 'unavailable' when there's
+// nothing to read (no speech) or the AI couldn't help.
+export type Suggestions = {
+  status: 'none' | 'generating' | 'ready' | 'unavailable';
+  title: string | null;
+  description: string | null;
+  tags: string[];
+  coverSec: number | null;
+};
+
+export type UploadState = {
+  status: 'uploading' | 'processing' | 'ready' | 'errored';
+  error: string | null;
+  durationSec: number | null;
+  suggestions: Suggestions;
+  // Frames to pick the cover from, once the video is ready.
+  frames: { sec: number; url: string }[];
+};
+
+export type ShortStatus = 'draft' | 'in_review' | 'published' | 'rejected';
+
+// One of this person's own Shorts, with where it is in review.
+export type MyShort = Short & {
+  status: ShortStatus;
+  // Why a host didn't approve it, if they said.
+  reviewNote: string | null;
+  coverSec: number | null;
+  video: { id: string; status: 'uploading' | 'processing' | 'ready' | 'errored'; error: string | null } | null;
+  createdAt: string;
+  publishedAt: string | null;
+};
+
+export type ShortDetails = { title: string; description: string; tags: string[]; coverSec?: number };
 
 export type Comment = {
   id: string;
@@ -118,6 +164,18 @@ export const api = {
     request<Comment>(`/api/items/${type}/${id}/comments`, { method: 'POST', body: JSON.stringify({ name, body, atSec }) }),
   reportComment: (type: ItemType, id: string, commentId: string, reason: string) =>
     request<void>(`/api/items/${type}/${id}/comments/${commentId}/report`, { method: 'POST', body: JSON.stringify({ reason }) }),
+  me: () => request<Profile>('/api/me'),
+  saveMe: (name: string, acceptGuidelines?: boolean) => request<Profile>('/api/me', { method: 'PUT', body: JSON.stringify({ name, acceptGuidelines }) }),
+  // range: the part of the video to keep, when not all of it.
+  createUpload: (range?: { startSec: number; endSec: number }) =>
+    request<{ videoId: string; uploadUrl: string }>('/api/me/uploads', { method: 'POST', body: JSON.stringify(range ?? {}) }),
+  upload: (videoId: string) => request<UploadState>(`/api/me/uploads/${videoId}`),
+  discardUpload: (videoId: string) => request<void>(`/api/me/uploads/${videoId}`, { method: 'DELETE' }),
+  myShorts: () => request<MyShort[]>('/api/me/shorts'),
+  postShort: (videoId: string, details: ShortDetails) =>
+    request<MyShort>('/api/me/shorts', { method: 'POST', body: JSON.stringify({ videoId, ...details }) }),
+  updateMyShort: (id: string, details: Partial<ShortDetails>) => request<MyShort>(`/api/me/shorts/${id}`, { method: 'PATCH', body: JSON.stringify(details) }),
+  deleteMyShort: (id: string) => request<void>(`/api/me/shorts/${id}`, { method: 'DELETE' }),
   saveProgress: (episodeId: string, positionSec: number) =>
     request(`/api/progress/${episodeId}`, {
       method: 'PUT',

@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, useWindowDimensions, View, type ViewToken } from 'react-native';
-import { router, useIsFocused } from 'expo-router';
+import { router, useFocusEffect, useIsFocused } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ErrorState } from '../../components/ErrorState';
 import { Glass } from '../../components/Glass';
@@ -17,6 +17,15 @@ import { useFetch } from '../../lib/useFetch';
 
 export default function ShortsScreen() {
   const { data, error, reload } = useFetch(api.shorts);
+  // Coming back after a while picks up Shorts approved since.
+  const loadedAt = useRef(Date.now());
+  useFocusEffect(
+    useCallback(() => {
+      if (Date.now() - loadedAt.current < 60_000) return;
+      loadedAt.current = Date.now();
+      reload();
+    }, [reload])
+  );
   const [height, setHeight] = useState(0);
   const [visibleId, setVisibleId] = useState<string | null>(null);
   const focused = useIsFocused();
@@ -132,7 +141,17 @@ function ShortItem({ short, height, active, index, total }: { short: Short; heig
             {short.episodeTitle}
           </Text>
         )}
+        {short.author && (
+          <Text style={[type.footnote, styles.shadowed, { color: '#fff', fontWeight: '700' }]} numberOfLines={1}>
+            by {short.author.name}
+          </Text>
+        )}
         <Text style={[type.title, styles.shadowed, { color: '#fff' }]}>{short.title}</Text>
+        {!!short.description && (
+          <Text style={[type.footnote, styles.shadowed, { color: 'rgba(255,255,255,0.9)' }]} numberOfLines={2}>
+            {short.description}
+          </Text>
+        )}
         <Tags tags={short.tags} light />
         {short.episodeId && (
           <Pressable

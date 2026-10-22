@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const express = require('express');
 const { STATUSES } = require('./db');
 const { httpError, MAX_SHORT_SEC } = require('./store');
+const { num, str, tags } = require('./validate');
 
 // Host mode: uploading and publishing episodes and Shorts.
 //
@@ -55,21 +56,6 @@ function requireHost(passcode = process.env.HOST_PASSCODE, db) {
 // Express 4 doesn't catch rejected promises from handlers.
 const ah = (fn) => (req, res, next) => fn(req, res, next).catch(next);
 
-function str(value, name, { required = false, max = 5000 } = {}) {
-  if (value === undefined && !required) return undefined;
-  if (typeof value !== 'string' || (required && !value.trim())) throw httpError(400, `${name} is required`);
-  if (value.length > max) throw httpError(400, `${name} is too long (max ${max} characters)`);
-  return value.trim();
-}
-
-function num(value, name, { required = false, min = -Infinity, max = Infinity } = {}) {
-  if (value === undefined && !required) return undefined;
-  if (typeof value !== 'number' || !Number.isFinite(value) || value < min || value > max) {
-    throw httpError(400, `${name} must be a number${Number.isFinite(min) ? ` from ${min}` : ''}${Number.isFinite(max) ? ` to ${max}` : ''}`);
-  }
-  return value;
-}
-
 // An ISO time up to a year ahead; only with status "published".
 function publishAt(value, statusValue) {
   if (value === undefined || value === null) return undefined;
@@ -84,16 +70,6 @@ function status(value) {
   if (value === undefined) return undefined;
   if (!STATUSES.includes(value)) throw httpError(400, `status must be one of ${STATUSES.join(', ')}`);
   return value;
-}
-
-// "#AI, Testing ,ai" -> ["ai", "testing"]. Up to 10 tags of 30 characters.
-function tags(value) {
-  if (value === undefined) return undefined;
-  if (!Array.isArray(value) || value.some((t) => typeof t !== 'string')) throw httpError(400, 'tags must be a list of words');
-  const clean = [...new Set(value.map((t) => t.trim().replace(/^#+/, '').toLowerCase()).filter(Boolean))];
-  if (clean.length > 10) throw httpError(400, 'Up to 10 tags');
-  if (clean.some((t) => t.length > 30)) throw httpError(400, 'Tags can be at most 30 characters');
-  return clean;
 }
 
 function mentions(value) {
@@ -292,8 +268,12 @@ function hostRouter({ store, engagement, baseUrl, passcode, db }) {
       const b = req.body || {};
       const found = await store.updateShort(req.params.id, {
         title: str(b.title, 'title', { max: 200 }),
+        description: str(b.description, 'description', { max: 1000 }),
         focusX: num(b.focusX, 'focusX', { min: 0, max: 1 }),
         tags: tags(b.tags),
+        coverSec: num(b.coverSec, 'coverSec', { min: 0 }),
+        // Shown to the uploader when a posted Short isn't approved.
+        reviewNote: b.reviewNote === null ? null : str(b.reviewNote, 'reviewNote', { max: 500 }),
         status: status(b.status),
         publishAt: publishAt(b.publishAt, b.status),
       });

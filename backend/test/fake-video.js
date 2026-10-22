@@ -33,7 +33,13 @@ function fakeVideo() {
     },
     async createClip(opts) {
       state.calls.push(['createClip', opts]);
-      return { assetId: addAsset(opts.endSec - opts.startSec) };
+      const assetId = addAsset(opts.endSec - opts.startSec);
+      assets.get(assetId).captionsRequested = !!opts.captions;
+      return { assetId };
+    },
+    async deleteAsset(assetId) {
+      state.calls.push(['deleteAsset', assetId]);
+      assets.delete(assetId);
     },
     async getAsset(assetId) {
       const stored = assets.get(assetId);

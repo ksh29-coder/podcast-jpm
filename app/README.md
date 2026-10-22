@@ -5,7 +5,12 @@ Expo (React Native) app for iPhone and Android: build step 2–4 of the project 
 - **Episodes**: list with listening progress; episode page with play/pause, back 15s / forward 30s,
   speed, a scrub bar, tappable chapters, and an Audio/Video toggle that keeps your place.
 - **Shorts**: vertical swipe feed of clips; "Play full episode from here" opens the episode at that clip.
-- **Downloads**: save an episode's audio to the phone and play it offline (not available in the web preview).
+- **＋ (New)**: anyone can post a Short. Record with the camera or choose a video (Upload, bottom left),
+  trim it to 90 seconds, then add details while it uploads; AI suggests the title, description, tags
+  and cover from what's said. It waits for a host to approve it (Host mode → Shorts to review).
+- **Me**: your name, your Shorts with their review status (In review, Live with stats, Not approved
+  with the host's note), and **Downloads**: an episode's audio saved for offline listening
+  (not available in the web preview).
 - One shared audio player: keeps playing while you browse, with the screen locked, with lock-screen
   controls, and saves your position to the backend so you can resume on another device.
 

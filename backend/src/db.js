@@ -4,7 +4,7 @@ const path = require('path');
 const SEED_PATH = path.join(__dirname, '..', 'data', 'episodes.json');
 
 // Every episode and Short moves through these. Hosts can publish directly;
-// uploads from other people will stop at in_review until a host approves them.
+// Shorts from everyone else stop at in_review until a host approves them.
 const STATUSES = ['draft', 'in_review', 'published', 'rejected'];
 
 // Things viewers can like, view and comment on.
@@ -165,6 +165,36 @@ create table if not exists comment_reports (
   created_at timestamptz not null default now(),
   primary key (comment_id, user_id)
 );
+
+-- Everyone can post Shorts from the app (the ＋ tab). They wait in_review
+-- until a host approves them. A profile holds the name shown on someone's
+-- Shorts and when they agreed to the posting guidelines.
+create table if not exists profiles (
+  user_id text primary key,
+  name text not null,
+  guidelines_at timestamptz,
+  updated_at timestamptz not null default now()
+);
+-- Who uploaded a video, and the part of it to keep: once the upload is in,
+-- the video service cuts that range into a new video and the original is
+-- deleted, so nothing outside it is kept.
+alter table videos add column if not exists owner_id text;
+alter table videos add column if not exists trim_start double precision;
+alter table videos add column if not exists trim_end double precision;
+-- The uncut upload, kept until the cut video is ready (it's made from it).
+alter table videos add column if not exists source_asset_id text;
+-- AI suggestions for the uploader's details screen (title, description,
+-- tags, cover frame) and a check for the host. Status: none, generating,
+-- ready, unavailable (no speech to read).
+alter table videos add column if not exists suggest_status text not null default 'none';
+alter table videos add column if not exists suggest_started_at timestamptz;
+alter table videos add column if not exists suggestions jsonb;
+-- null for Shorts made by hosts.
+alter table shorts add column if not exists author_id text;
+alter table shorts add column if not exists description text not null default '';
+alter table shorts add column if not exists cover_sec double precision;
+-- Why a host didn't approve it, shown to the uploader.
+alter table shorts add column if not exists review_note text;
 `;
 
 // Creates the tables if needed, and fills an empty database from
@@ -196,7 +226,10 @@ async function migrate(db, seedPath = SEED_PATH) {
 function connect(url = process.env.DATABASE_URL) {
   if (!url) throw new Error('DATABASE_URL is not set');
   const { Pool } = require('pg');
-  const pool = new Pool({ connectionString: url, max: 3 });
+  // Neon drops connections that sit idle, so don't keep them long, and don't
+  // let a dropped idle one crash the server.
+  const pool = new Pool({ connectionString: url, max: 3, idleTimeoutMillis: 30_000, keepAlive: true });
+  pool.on('error', (e) => console.warn('database connection', e.message));
   return {
     query: (text, params) => pool.query(text, params),
     exec: (sql) => pool.query(sql),

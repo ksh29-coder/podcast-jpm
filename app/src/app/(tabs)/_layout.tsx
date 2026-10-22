@@ -1,3 +1,5 @@
+import { Platform } from 'react-native';
+import { router } from 'expo-router';
 import { NativeTabs } from 'expo-router/unstable-native-tabs';
 import { MiniPlayer } from '../../components/MiniPlayer';
 import { usePlayer } from '../../lib/player';
@@ -23,9 +25,19 @@ export default function TabsLayout() {
         <NativeTabs.Trigger.Label>Shorts</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon sf={{ default: 'play.rectangle.on.rectangle', selected: 'play.rectangle.on.rectangle.fill' }} md="smart_display" />
       </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="(downloads)" contentStyle={{ backgroundColor: colors.bg }}>
-        <NativeTabs.Trigger.Label>Downloads</NativeTabs.Trigger.Label>
-        <NativeTabs.Trigger.Icon sf={{ default: 'arrow.down.circle', selected: 'arrow.down.circle.fill' }} md="download" />
+      {/* ＋ opens the camera over everything instead of switching tabs. */}
+      <NativeTabs.Trigger
+        name="create"
+        disabled={Platform.OS !== 'web'}
+        listeners={{ tabPress: () => Platform.OS !== 'web' && router.push('/post') }}
+        contentStyle={{ backgroundColor: colors.bg }}
+      >
+        <NativeTabs.Trigger.Label>New</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon sf={{ default: 'plus.circle', selected: 'plus.circle.fill' }} md="add_circle" />
+      </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="(me)" contentStyle={{ backgroundColor: colors.bg }}>
+        <NativeTabs.Trigger.Label>Me</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon sf={{ default: 'person.crop.circle', selected: 'person.crop.circle.fill' }} md="account_circle" />
       </NativeTabs.Trigger>
       {/* iOS 26 shows this as the separate search button at the end of the tab bar. */}
       <NativeTabs.Trigger name="search" role="search" contentStyle={{ backgroundColor: colors.bg }}>

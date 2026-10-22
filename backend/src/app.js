@@ -6,6 +6,7 @@ const { createEngagement } = require('./engagement');
 const { openRouterAi } = require('./ai');
 const { openRouterTranscriber } = require('./transcribe');
 const { hostRouter } = require('./host');
+const { meRouter } = require('./me');
 const { createStore } = require('./store');
 const { muxVideo } = require('./video');
 
@@ -14,9 +15,9 @@ const MEDIA_DIR = path.join(__dirname, '..', 'public', 'media');
 // Express 4 doesn't catch rejected promises from handlers.
 const ah = (fn) => (req, res, next) => fn(req, res, next).catch(next);
 
-function createApp({ db = connect(), video = muxVideo(), ai = openRouterAi(), transcriber = openRouterTranscriber(), tint, mediaDir = MEDIA_DIR, auth = authMiddleware(), hostPasscode } = {}) {
+function createApp({ db = connect(), video = muxVideo(), ai = openRouterAi(), transcriber = openRouterTranscriber(), tint, mediaDir = MEDIA_DIR, auth = authMiddleware(), hostPasscode, cleanUpEveryMs } = {}) {
   const app = express();
-  const store = createStore({ db, video, ai, transcriber, ...(tint && { tint }) });
+  const store = createStore({ db, video, ai, transcriber, ...(tint && { tint }), ...(cleanUpEveryMs !== undefined && { cleanUpEveryMs }) });
   const engagement = createEngagement({ db });
 
   // Tables are created (and seeded) on first use, so a fresh database needs no
@@ -52,7 +53,7 @@ function createApp({ db = connect(), video = muxVideo(), ai = openRouterAi(), tr
     res.json({
       service: 'AI Dev Wave backend',
       ok: true,
-      endpoints: ['/api/episodes', '/api/episodes/:id', '/api/episodes/:id/transcript', '/api/search?q=', '/api/shorts', '/api/progress', '/api/items/*', '/api/host/*', '/media/*'],
+      endpoints: ['/api/episodes', '/api/episodes/:id', '/api/episodes/:id/transcript', '/api/search?q=', '/api/shorts', '/api/progress', '/api/items/*', '/api/me/*', '/api/host/*', '/media/*'],
     });
   });
 
@@ -65,6 +66,7 @@ function createApp({ db = connect(), video = muxVideo(), ai = openRouterAi(), tr
   app.use('/api', ensureDb);
   app.use('/api/host', hostRouter({ store, engagement, baseUrl, passcode: hostPasscode, db }));
   app.use('/api/items', engagement.router());
+  app.use('/api/me', meRouter({ store, engagement, baseUrl }));
 
   app.get(
     '/api/episodes',
