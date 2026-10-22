@@ -4,6 +4,7 @@ import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { ErrorState } from '../../../components/ErrorState';
 import { Icon } from '../../../components/Icon';
 import { api, type MyEpisode, type MyShort, type Profile } from '../../../lib/api';
+import { unblockAll, useBlocked } from '../../../lib/blocked';
 import { saveDisplayName } from '../../../lib/device';
 import { colors, radius, spacing, type } from '../../../theme';
 
@@ -20,6 +21,7 @@ export default function MeScreen() {
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [showPosted, setShowPosted] = useState(true);
+  const blocked = useBlocked();
 
   const load = useCallback(async () => {
     try {
@@ -99,8 +101,20 @@ export default function MeScreen() {
             <Text style={[type.headline, { flex: 1 }]}>Downloads</Text>
             <Icon name="chevronRight" size={16} color={colors.textMuted} />
           </Pressable>
+          {blocked.length > 0 && (
+            <Pressable style={styles.row} onPress={() => unblockAll()} accessibilityRole="button" accessibilityHint="Shows their posts and comments again">
+              <Icon name="eyeSlash" size={22} />
+              <Text style={[type.headline, { flex: 1 }]}>Hidden people: {blocked.length}</Text>
+              <Text style={[type.subhead, { color: colors.highlight, fontWeight: '700' }]}>Show again</Text>
+            </Pressable>
+          )}
           <Text style={[type.eyebrow, styles.section]}>My uploads</Text>
         </View>
+      }
+      ListFooterComponent={
+        <Pressable onPress={() => router.push('/privacy')} style={styles.footer} accessibilityRole="link">
+          <Text style={[type.footnote, { color: colors.textMuted }]}>Privacy policy</Text>
+        </Pressable>
       }
       ListEmptyComponent={
         <View style={styles.empty}>
@@ -246,6 +260,7 @@ const styles = StyleSheet.create({
   item: { flexDirection: 'row', gap: spacing.md, paddingHorizontal: spacing.xl, paddingVertical: spacing.md },
   thumb: { width: 72, height: 96, borderRadius: radius.sm, backgroundColor: colors.cardHigh },
   thumbEpisode: { width: 96, height: 96 },
+  footer: { alignItems: 'center', padding: spacing.xl },
   line: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, flexWrap: 'wrap' },
   dot: { width: 8, height: 8, borderRadius: 4 },
   note: { color: colors.text, fontStyle: 'italic' },

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { AiCheckLine } from '../../../components/host/AiCheckLine';
+import { ReportsLine } from '../../../components/host/cards';
 import { useHost } from '../../../components/host/HostGate';
 import { ui } from '../../../components/host/ui';
 import { TagsField } from '../../../components/post/TagsField';
@@ -68,6 +69,7 @@ export default function ReviewShort() {
         {isEpisode ? 'Episode' : 'Short'} posted by {short.author?.name ?? 'a host'} · {formatWhen(short.createdAt)}
       </Text>
       <View style={ui.card}>
+        <ReportsLine reports={short.reports} />
         <AiCheckLine check={short.aiCheck} />
         <Text style={ui.hint}>The AI only reads what’s said. Check what’s on screen yourself, such as code or documents.</Text>
       </View>
@@ -110,10 +112,11 @@ export default function ReviewShort() {
             disabled={busy || !!processing || !title.trim()}
             onPress={() => decide({ title: title.trim(), description: description.trim(), tags, status: 'published' })}
           >
-            <Text style={ui.buttonText}>{busy ? 'Saving…' : 'Approve and publish'}</Text>
+            <Text style={ui.buttonText}>{busy ? 'Saving…' : short.status === 'published' ? 'Keep it up' : 'Approve and publish'}</Text>
           </Pressable>
           <Pressable style={[ui.button, ui.secondary]} onPress={() => setRejecting(true)}>
-            <Text style={ui.secondaryText}>Reject…</Text>
+            {/* Already live (a reported host episode or Short): taking it down. */}
+            <Text style={ui.secondaryText}>{short.status === 'published' ? 'Take down…' : 'Reject…'}</Text>
           </Pressable>
         </View>
       )}

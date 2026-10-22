@@ -118,6 +118,25 @@ function createEngagement({ db }) {
       })
     );
 
+    // Report an episode or Short. Something posted from the app or website is
+    // hidden straight away and goes back to the hosts' review queue; a host's
+    // own episode or Short stays up, flagged for them.
+    r.post(
+      '/:type/:id/report',
+      ah(async (req, res) => {
+        const { type, id } = req.params;
+        await requirePublished(type, id);
+        const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim().slice(0, 300) : '';
+        await db.query(
+          `insert into content_reports (item_type, item_id, user_id, reason) values ($1, $2, $3, $4)
+           on conflict (item_type, item_id, user_id) do update set reason = excluded.reason, created_at = now()`,
+          [type, id, req.user.id, reason]
+        );
+        await db.query(`update ${TABLE[type]} set status = 'in_review', updated_at = now() where id = $1 and author_id is not null`, [id]);
+        res.status(204).end();
+      })
+    );
+
     // Report a comment. It's hidden straight away and goes back to the hosts'
     // review queue with the reason.
     r.post(

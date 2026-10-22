@@ -9,14 +9,19 @@ import { ShortVideo, type ShortVideoHandle } from '../../components/ShortVideo';
 import { Scrubber } from '../../components/Scrubber';
 import { shareItem } from '../../components/engage/share';
 import { Tags } from '../../components/engage/Tags';
+import { PostMenu } from '../../components/engage/PostMenu';
 import { useLike } from '../../components/engage/useLike';
 import { api, type Short } from '../../lib/api';
+import { isBlocked, useBlocked } from '../../lib/blocked';
 import { usePlayer } from '../../lib/player';
 import { colors, radius, spacing, type } from '../../theme';
 import { useFetch } from '../../lib/useFetch';
 
 export default function ShortsScreen() {
-  const { data, error, reload } = useFetch(api.shorts);
+  const { data: all, error, reload } = useFetch(api.shorts);
+  // Without anything from people this person hid.
+  const blocked = useBlocked();
+  const data = all && all.filter((s) => !isBlocked(blocked, s));
   // Coming back after a while picks up Shorts approved since.
   const loadedAt = useRef(0);
   useFocusEffect(
@@ -97,6 +102,7 @@ function ShortItem({ short, height, active, index, total }: { short: Short; heig
   }, [active, short.id]);
 
   const like = useLike('short', short.id, short);
+  const [menu, setMenu] = useState(false);
 
   const { width } = useWindowDimensions();
   // A wide video fills the tall screen by cropping its sides; focusX picks
@@ -137,7 +143,9 @@ function ShortItem({ short, height, active, index, total }: { short: Short; heig
           onPress={() => shareItem({ title: short.title, path: short.episodeId ? `/episode/${short.episodeId}` : '/shorts' })}
         />
         <Action icon="eye" label={String(short.views)} a11y={`${short.views} views`} />
+        <Action icon="more" label="" a11y="More: report or hide" onPress={() => setMenu(true)} />
       </View>
+      <PostMenu visible={menu} onClose={() => setMenu(false)} itemType="short" id={short.id} author={short.author} />
       <View style={[styles.overlay, { bottom: chrome + 44 }]} pointerEvents="box-none">
         {short.episodeTitle && (
           <Text style={[type.eyebrow, styles.shadowed, { color: 'rgba(255,255,255,0.8)' }]} numberOfLines={1}>

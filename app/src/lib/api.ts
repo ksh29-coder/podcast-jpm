@@ -31,8 +31,9 @@ export type Episode = {
   id: string;
   title: string;
   description: string;
-  // Who posted it; null for episodes made by hosts.
-  author: { name: string } | null;
+  // Who posted it (key: an anonymous id for hiding their posts); null for
+  // episodes made by hosts.
+  author: { name: string; key: string } | null;
   publishedAt: string;
   durationSec: number;
   artworkUrl: string;
@@ -55,8 +56,9 @@ export type Short = Clip &
     episodeTitle: string | null;
     artworkUrl: string | null;
     description: string;
-    // Who posted it; null for Shorts made by hosts.
-    author: { name: string } | null;
+    // Who posted it (key: an anonymous id for hiding their posts); null for
+    // Shorts made by hosts.
+    author: { name: string; key: string } | null;
   };
 
 // ---- Posting Shorts (anyone) ----
@@ -175,6 +177,9 @@ export const api = {
   comments: (type: ItemType, id: string) => request<Comment[]>(`/api/items/${type}/${id}/comments`),
   postComment: (type: ItemType, id: string, name: string, body: string, atSec?: number) =>
     request<Comment>(`/api/items/${type}/${id}/comments`, { method: 'POST', body: JSON.stringify({ name, body, atSec }) }),
+  // Report an episode or Short (one posted from the app or website is hidden until a host looks).
+  reportItem: (type: ItemType, id: string, reason: string) =>
+    request<void>(`/api/items/${type}/${id}/report`, { method: 'POST', body: JSON.stringify({ reason }) }),
   reportComment: (type: ItemType, id: string, commentId: string, reason: string) =>
     request<void>(`/api/items/${type}/${id}/comments/${commentId}/report`, { method: 'POST', body: JSON.stringify({ reason }) }),
   me: () => request<Profile>('/api/me'),

@@ -61,10 +61,10 @@ export function useHostData() {
     error,
     busyId,
     load,
-    // Posted from the app or website and waiting for a host.
-    toReview: [...(shorts ?? []).filter((s) => s.author && s.status === 'in_review'), ...(episodes ?? []).filter((e) => e.author && e.status === 'in_review')].sort((a, b) =>
-      a.createdAt.localeCompare(b.createdAt)
-    ),
+    // Posted from the app or website and waiting for a host, or reported by viewers.
+    toReview: [...(shorts ?? []), ...(episodes ?? [])]
+      .filter((x) => (x.author && x.status === 'in_review') || (x.reports?.length && x.status === 'published'))
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
     setStatus: (kind: 'episode' | 'short', id: string, status: Status) =>
       run(id, () => (kind === 'episode' ? api.updateEpisode(id, { status }) : api.updateShort(id, { status }))),
     reviewComment: (id: string, status: 'approved' | 'rejected') => run(id, () => api.setCommentStatus(id, status)),

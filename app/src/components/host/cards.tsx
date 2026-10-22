@@ -86,12 +86,24 @@ export function ReviewCard({ item, onOpen, progress }: { item: ReviewItem; onOpe
           {item.title}
         </Text>
         <Text style={ui.hint}>
-          {isEpisode ? 'Episode' : 'Short'} by {item.author?.name} · {formatWhen(item.createdAt)}
+          {isEpisode ? 'Episode' : 'Short'} by {item.author?.name ?? 'a host'} · {formatWhen(item.createdAt)}
         </Text>
         <AiCheckLine check={item.aiCheck} />
+        <ReportsLine reports={item.reports} />
         {progress && <Text style={ui.hint}>{progress}</Text>}
       </View>
     </Pressable>
+  );
+}
+
+// What viewers said when they reported it, if anyone did.
+export function ReportsLine({ reports }: { reports?: string[] }) {
+  if (!reports?.length) return null;
+  return (
+    <Text style={[ui.hint, { color: colors.danger }]}>
+      Reported {reports.length === 1 ? 'once' : `${reports.length} times`}
+      {reports.some(Boolean) ? `: ${reports.filter(Boolean).join('; ')}` : ''}
+    </Text>
   );
 }
 

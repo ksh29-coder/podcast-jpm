@@ -53,6 +53,8 @@ export type HostEpisode = Omit<Episode, 'clips'> &
     clips: HostShort[];
     reviewNote?: string | null;
     aiCheck?: AiCheck;
+    // Reasons viewers gave when reporting it.
+    reports?: string[];
   };
 export type HostShort = Clip &
   HostFields &
@@ -62,8 +64,9 @@ export type HostShort = Clip &
     artworkUrl: string | null;
     description: string;
     // Posted from the app by someone (null when a host made it).
-    author: { name: string } | null;
+    author: { name: string; key: string } | null;
     coverSec: number | null;
+    reports?: string[];
     reviewNote: string | null;
     aiCheck: AiCheck;
   };

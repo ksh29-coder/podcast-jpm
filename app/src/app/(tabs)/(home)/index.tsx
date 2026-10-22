@@ -4,13 +4,17 @@ import { EpisodeRow } from '../../../components/EpisodeRow';
 import { ErrorState } from '../../../components/ErrorState';
 import { Icon } from '../../../components/Icon';
 import { api, type Episode } from '../../../lib/api';
+import { isBlocked, useBlocked } from '../../../lib/blocked';
 import { formatDate, formatDuration } from '../../../lib/format';
 import { usePlayer } from '../../../lib/player';
 import { useFetch } from '../../../lib/useFetch';
 import { colors, radius, spacing, tintWash, type, withAlpha } from '../../../theme';
 
 export default function EpisodesScreen() {
-  const { data, error, loading, reload } = useFetch(api.episodes);
+  const { data: all, error, loading, reload } = useFetch(api.episodes);
+  // Without anything from people this person hid.
+  const blocked = useBlocked();
+  const data = all && all.filter((ep) => !isBlocked(blocked, ep));
   const { progress } = usePlayer();
 
   if (error && !data) return <ErrorState message={error} onRetry={reload} />;
