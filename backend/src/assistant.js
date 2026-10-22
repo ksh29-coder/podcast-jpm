@@ -1,5 +1,6 @@
 const express = require('express');
 const { httpError } = require('./store');
+const { VOICES } = require('./voice');
 
 // The voice assistant in Search: a live conversation about what's on
 // AI Dev Wave. It finds things with the tools below (run by the app, which
@@ -100,14 +101,16 @@ function assistantRouter({ db, store, voice, baseUrl }) {
   }
 
   // Start a conversation: a short-lived key for the voice service, and how
-  // long this one may last.
+  // long this one may last. `voice` picks how it sounds (one of VOICES).
   r.post(
     '/session',
     ah(async (req, res) => {
       if (!voice) throw httpError(503, 'The voice assistant isn’t set up on this server');
+      const picked = req.body?.voice;
+      if (picked !== undefined && !VOICES.includes(picked)) throw httpError(400, `voice must be one of ${VOICES.join(', ')}`);
       const left = DAILY_SEC - (await usedToday(req.user.id));
       if (left < 15) throw httpError(429, 'You’ve used today’s 10 minutes with the assistant. It resets tomorrow.');
-      const session = await voice.createSession({ instructions: INSTRUCTIONS, tools: TOOLS });
+      const session = await voice.createSession({ instructions: INSTRUCTIONS, tools: TOOLS, ...(picked && { voice: picked }) });
       res.json({ ...session, maxSec: Math.min(SESSION_SEC, left), leftTodaySec: left });
     })
   );

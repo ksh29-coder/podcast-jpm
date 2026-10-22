@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Animated, Easing, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Animated, Easing, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useVoiceAssistant, type AssistantState, type Card } from '../components/assistant/useVoiceAssistant';
+import { loadVoice, saveVoice, VOICES } from '../components/assistant/voices';
 import { Icon } from '../components/Icon';
 import { formatTime } from '../lib/format';
 import { colors, radius, spacing, type } from '../theme';
@@ -19,8 +20,27 @@ const LABEL: Record<AssistantState, string> = {
 // The voice assistant, opened from the mic in Search: talk about what's on
 // AI Dev Wave, and what it finds appears as cards to open.
 export default function AssistantScreen() {
+  const [voice, setVoice] = useState<string | null>(null);
+  useEffect(() => {
+    loadVoice().then(setVoice);
+  }, []);
+  if (!voice) return <ActivityIndicator style={{ flex: 1, backgroundColor: colors.bg }} color={colors.text} />;
+  // A new voice starts a new conversation, so it's heard straight away.
+  return (
+    <Conversation
+      key={voice}
+      voice={voice}
+      onVoice={(v) => {
+        saveVoice(v);
+        setVoice(v);
+      }}
+    />
+  );
+}
+
+function Conversation({ voice, onVoice }: { voice: string; onVoice: (v: string) => void }) {
   const insets = useSafeAreaInsets();
-  const { state, error, cards, left, stop } = useVoiceAssistant();
+  const { state, error, cards, left, stop } = useVoiceAssistant(voice);
 
   const close = () => {
     stop();
@@ -44,6 +64,25 @@ export default function AssistantScreen() {
         </Pressable>
         <Text style={[type.footnote, { fontVariant: ['tabular-nums'] }]}>{left != null && state !== 'ended' && state !== 'error' ? `${formatTime(left)} left` : ''}</Text>
       </View>
+
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }} contentContainerStyle={styles.voices}>
+        <Text style={[type.eyebrow, { alignSelf: 'center' }]}>Voice</Text>
+        {VOICES.map((v) => {
+          const on = v.id === voice;
+          return (
+            <Pressable
+              key={v.id}
+              onPress={() => !on && onVoice(v.id)}
+              style={[styles.voice, on && styles.voiceOn]}
+              accessibilityRole="button"
+              accessibilityState={{ selected: on }}
+              accessibilityLabel={`Voice ${v.label}`}
+            >
+              <Text style={[styles.voiceText, on && { color: colors.accentText }]}>{v.label}</Text>
+            </Pressable>
+          );
+        })}
+      </ScrollView>
 
       <View style={styles.center}>
         <Orb state={state} />
@@ -146,6 +185,10 @@ const styles = StyleSheet.create({
   orbSpeaking: { boxShadow: `0 0 80px rgba(255,181,71,0.35)` },
   bar: { width: 16, borderRadius: 8 },
   cards: { gap: spacing.md, paddingVertical: spacing.xs },
+  voices: { gap: spacing.sm, alignItems: 'center', marginHorizontal: 'auto' },
+  voice: { paddingHorizontal: spacing.md, paddingVertical: spacing.xs + 2, borderRadius: radius.full, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border },
+  voiceOn: { backgroundColor: colors.accent, borderColor: colors.accent },
+  voiceText: { color: colors.text, fontWeight: '700', fontSize: 13 },
   card: { width: 160, gap: spacing.xs, padding: spacing.sm, borderRadius: radius.lg, backgroundColor: colors.card },
   moment: { width: 220, padding: spacing.md, gap: spacing.sm },
   art: { width: 144, height: 144, borderRadius: radius.md, backgroundColor: colors.cardHigh },
