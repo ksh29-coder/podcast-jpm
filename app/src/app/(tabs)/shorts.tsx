@@ -8,13 +8,13 @@ import { Icon, type IconName } from '../../components/Icon';
 import { ShortVideo, type ShortVideoHandle } from '../../components/ShortVideo';
 import { Scrubber } from '../../components/Scrubber';
 import { shareItem } from '../../components/engage/share';
-import { Tags } from '../../components/engage/Tags';
+import { ShortInfo } from '../../components/engage/ShortInfo';
 import { PostMenu } from '../../components/engage/PostMenu';
 import { useLike } from '../../components/engage/useLike';
 import { api, type Short } from '../../lib/api';
 import { isBlocked, useBlocked } from '../../lib/blocked';
 import { usePlayer } from '../../lib/player';
-import { colors, radius, spacing, type } from '../../theme';
+import { colors, spacing, type } from '../../theme';
 import { useFetch } from '../../lib/useFetch';
 
 export default function ShortsScreen() {
@@ -147,35 +147,7 @@ function ShortItem({ short, height, active, index, total }: { short: Short; heig
       </View>
       <PostMenu visible={menu} onClose={() => setMenu(false)} itemType="short" id={short.id} author={short.author} />
       <View style={[styles.overlay, { bottom: chrome + 44 }]} pointerEvents="box-none">
-        {short.episodeTitle && (
-          <Text style={[type.eyebrow, styles.shadowed, { color: 'rgba(255,255,255,0.8)' }]} numberOfLines={1}>
-            {short.episodeTitle}
-          </Text>
-        )}
-        {short.author && (
-          <Text style={[type.footnote, styles.shadowed, { color: '#fff', fontWeight: '700' }]} numberOfLines={1}>
-            by {short.author.name}
-          </Text>
-        )}
-        <Text style={[type.title, styles.shadowed, { color: '#fff' }]}>{short.title}</Text>
-        {!!short.description && (
-          <Text style={[type.footnote, styles.shadowed, { color: 'rgba(255,255,255,0.9)' }]} numberOfLines={2}>
-            {short.description}
-          </Text>
-        )}
-        <Tags tags={short.tags} light />
-        {short.episodeId && (
-          <Pressable
-            style={({ pressed }) => [styles.cta, pressed && { opacity: 0.8 }]}
-            onPress={() => router.push(short.startSec != null ? `/episode/${short.episodeId}?t=${short.startSec}` : `/episode/${short.episodeId}`)}
-            accessibilityRole="button"
-          >
-            <Icon name="headphones" size={15} color={colors.accentText} />
-            <Text style={[type.footnote, { color: colors.accentText, fontWeight: '700' }]}>
-              {short.startSec != null ? 'Play full episode from here' : 'Play the full episode'}
-            </Text>
-          </Pressable>
-        )}
+        <ShortInfo short={short} />
       </View>
       {time.duration > 0 && (
         <View style={[styles.progress, { bottom: chrome }]}>
@@ -215,15 +187,4 @@ const styles = StyleSheet.create({
   actionLabel: { ...type.caption, color: '#fff', fontWeight: '700', fontVariant: ['tabular-nums'] },
   shadowed: { textShadowColor: 'rgba(0,0,0,0.55)', textShadowRadius: 6 },
   progress: { position: 'absolute', left: 0, right: 0 },
-  cta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'flex-start',
-    gap: spacing.xs + 2,
-    marginTop: spacing.xs,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm + 1,
-    borderRadius: radius.full,
-    backgroundColor: colors.accent,
-  },
 });
