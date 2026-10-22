@@ -7,6 +7,8 @@ const { openRouterAi } = require('./ai');
 const { openRouterTranscriber } = require('./transcribe');
 const { hostRouter } = require('./host');
 const { meRouter } = require('./me');
+const { assistantRouter } = require('./assistant');
+const { openAiVoice } = require('./voice');
 const { createStore } = require('./store');
 const { muxVideo } = require('./video');
 
@@ -15,7 +17,7 @@ const MEDIA_DIR = path.join(__dirname, '..', 'public', 'media');
 // Express 4 doesn't catch rejected promises from handlers.
 const ah = (fn) => (req, res, next) => fn(req, res, next).catch(next);
 
-function createApp({ db = connect(), video = muxVideo(), ai = openRouterAi(), transcriber = openRouterTranscriber(), tint, mediaDir = MEDIA_DIR, auth = authMiddleware(), hostPasscode, cleanUpEveryMs } = {}) {
+function createApp({ db = connect(), video = muxVideo(), ai = openRouterAi(), transcriber = openRouterTranscriber(), voice = openAiVoice(), tint, mediaDir = MEDIA_DIR, auth = authMiddleware(), hostPasscode, cleanUpEveryMs } = {}) {
   const app = express();
   const store = createStore({ db, video, ai, transcriber, ...(tint && { tint }), ...(cleanUpEveryMs !== undefined && { cleanUpEveryMs }) });
   const engagement = createEngagement({ db });
@@ -53,7 +55,7 @@ function createApp({ db = connect(), video = muxVideo(), ai = openRouterAi(), tr
     res.json({
       service: 'AI Dev Wave backend',
       ok: true,
-      endpoints: ['/api/episodes', '/api/episodes/:id', '/api/episodes/:id/transcript', '/api/search?q=', '/api/shorts', '/api/progress', '/api/items/*', '/api/me/*', '/api/host/*', '/media/*'],
+      endpoints: ['/api/episodes', '/api/episodes/:id', '/api/episodes/:id/transcript', '/api/search?q=', '/api/shorts', '/api/progress', '/api/items/*', '/api/me/*', '/api/assistant/*', '/api/host/*', '/media/*'],
     });
   });
 
@@ -67,6 +69,7 @@ function createApp({ db = connect(), video = muxVideo(), ai = openRouterAi(), tr
   app.use('/api/host', hostRouter({ store, engagement, baseUrl, passcode: hostPasscode, db }));
   app.use('/api/items', engagement.router());
   app.use('/api/me', meRouter({ store, engagement, baseUrl }));
+  app.use('/api/assistant', assistantRouter({ db, store, voice, baseUrl }));
 
   app.get(
     '/api/episodes',

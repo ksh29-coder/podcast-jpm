@@ -61,8 +61,12 @@ export default function SearchScreen() {
               placeholderTextColor={colors.textFaint}
               accessibilityLabel="Search"
             />
+            <Pressable onPress={() => router.push('/assistant')} style={styles.webMic} accessibilityRole="button" accessibilityLabel="Ask out loud">
+              <Icon name="mic" size={18} color={colors.accentText} />
+            </Pressable>
           </View>
         )}
+        {q.length < 2 && <AskCard />}
         {q.length < 2 && <Text style={[type.subhead, styles.hint]}>Search titles, tags, and everything said in episodes.</Text>}
         {loading && <ActivityIndicator color={colors.text} style={{ marginTop: spacing.xxxl }} />}
         {error && <Text style={[type.subhead, styles.hint, { color: colors.danger }]}>Search failed: {error}</Text>}
@@ -134,6 +138,21 @@ export default function SearchScreen() {
 
 const web = Platform.OS === 'web';
 
+// The way into the voice assistant: talk instead of typing.
+function AskCard() {
+  return (
+    <Pressable onPress={() => router.push('/assistant')} style={({ pressed }) => [styles.ask, pressed && { opacity: 0.85 }]} accessibilityRole="button" accessibilityLabel="Ask AI Dev Wave out loud">
+      <View style={styles.askMic}>
+        <Icon name="mic" size={26} color={colors.accentText} />
+      </View>
+      <View style={{ flex: 1, gap: 2 }}>
+        <Text style={type.headline}>Ask out loud</Text>
+        <Text style={type.footnote}>Talk to find episodes, Shorts and moments, like “what do we have on testing?”</Text>
+      </View>
+    </Pressable>
+  );
+}
+
 // The matching part of a line, in the highlight color.
 function Highlighted({ text, q }: { text: string; q: string }) {
   const i = text.toLowerCase().indexOf(q.toLowerCase());
@@ -163,6 +182,20 @@ const styles = StyleSheet.create({
   },
   // The rounded box around it shows focus; no browser outline inside it
   // ('none' is web-only, so React Native's types don't list it).
+  webMic: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' },
+  ask: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.lg,
+    margin: spacing.xl,
+    marginBottom: 0,
+    padding: spacing.lg,
+    borderRadius: radius.lg,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  askMic: { width: 52, height: 52, borderRadius: 26, backgroundColor: colors.highlight, alignItems: 'center', justifyContent: 'center' },
   webInput: { flex: 1, color: colors.text, fontSize: 17, paddingVertical: spacing.md, outlineStyle: 'none' as 'solid' },
   hint: { textAlign: 'center', paddingHorizontal: spacing.xxxl, paddingTop: spacing.xxxl },
   section: { paddingTop: spacing.lg },

@@ -57,6 +57,7 @@ const ICONS = {
   chevronUp: { sf: 'chevron.up', ion: 'chevron-up' },
   chevronLeft: { sf: 'chevron.left', ion: 'chevron-back' },
   film: { sf: 'film', ion: 'film-outline' },
+  mic: { sf: 'mic.fill', ion: 'mic' },
 } as const satisfies Record<string, { sf: SFSymbol; ion: keyof typeof Ionicons.glyphMap }>;
 
 export type IconName = keyof typeof ICONS;

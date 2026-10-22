@@ -28,10 +28,10 @@ const DETAIL = /^\/(episode|comments|transcript|playback)(\/|$)/;
 export function Shell({ children }: { children: ReactNode }) {
   const path = usePathname();
   const { width } = useWindowDimensions();
-  // Host Studio and the posting screens have their own frames. The structure
+  // Host Studio, the posting screens and the voice assistant have their own frames. The structure
   // here stays the same either way: changing it would remount the pages and
   // lose where the visitor is.
-  const bare = path.startsWith('/host') || path.startsWith('/post');
+  const bare = path.startsWith('/host') || path.startsWith('/post') || path.startsWith('/assistant');
   const wide = width >= WIDE;
   return (
     <View style={[styles.root, { flexDirection: wide ? 'row' : 'column' }]}>

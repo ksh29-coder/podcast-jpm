@@ -137,6 +137,8 @@ export type SearchResults = { episodes: Episode[]; shorts: Short[]; moments: Mom
 
 export type Progress = Record<string, { positionSec: number; updatedAt: string }>;
 
+export type AssistantSession = { token: string; connectUrl: string; expiresAt: number | null; maxSec: number; leftTodaySec: number };
+
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, {
     ...init,
@@ -193,6 +195,11 @@ export const api = {
   updateMyEpisode: (id: string, details: Partial<ShortDetails>) =>
     request<MyEpisode>(`/api/me/episodes/${id}`, { method: 'PATCH', body: JSON.stringify(details) }),
   deleteMyEpisode: (id: string) => request<void>(`/api/me/episodes/${id}`, { method: 'DELETE' }),
+  // The voice assistant: a short-lived key for one conversation, how long it
+  // lasted, and its tools (run on our server).
+  assistantSession: () => request<AssistantSession>('/api/assistant/session', { method: 'POST' }),
+  assistantUsage: (seconds: number) => request<{ leftTodaySec: number }>('/api/assistant/usage', { method: 'POST', body: JSON.stringify({ seconds }) }),
+  assistantTool: (name: string, args: unknown) => request<unknown>(`/api/assistant/tools/${name}`, { method: 'POST', body: JSON.stringify(args ?? {}) }),
   saveProgress: (episodeId: string, positionSec: number) =>
     request(`/api/progress/${episodeId}`, {
       method: 'PUT',
