@@ -25,6 +25,41 @@ const FORMATS = {
   // Lower bitrate: a long recording is held in the browser's memory until it uploads.
   episode: { w: 1280, h: 720, maxSec: 30 * 60, bitrate: 2_500_000 },
 } as const;
+// What to ask the browser for when sharing the screen. Beyond `video` and
+// `audio` these are hints newer than TypeScript's types, honoured by Chrome
+// and Edge only: offer the "Also share system audio" switch for a screen or
+// window (on a Mac that needs Chrome or Edge 141+ and macOS 14.2+, and it's
+// off until switched on), don't offer this tab, and let people switch tabs.
+type ScreenShareOptions = DisplayMediaStreamOptions & {
+  systemAudio?: 'include' | 'exclude';
+  windowAudio?: 'exclude' | 'window' | 'system';
+  selfBrowserSurface?: 'include' | 'exclude';
+  surfaceSwitching?: 'include' | 'exclude';
+};
+const SCREEN_SHARE: ScreenShareOptions = {
+  video: { frameRate: 30 },
+  // Music and video sound as it is: no voice processing on the shared sound.
+  audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+  systemAudio: 'include',
+  windowAudio: 'system',
+  selfBrowserSurface: 'exclude',
+  surfaceSwitching: 'include',
+};
+// Only Chromium browsers (Chrome, Edge) can include sound in a screen share.
+const canShareSound = typeof navigator !== 'undefined' && 'userAgentData' in navigator;
+
+// Whether the shared screen's sound is coming through: no sound shared, shared
+// but nothing playing yet, or heard.
+type ScreenSound = 'none' | 'silent' | 'heard';
+
+// What to tell someone whose screen recording won't have the screen's sound.
+function soundHint(sound: ScreenSound | null, surface?: string) {
+  if (!canShareSound) return 'Only your microphone will be recorded. Safari and Firefox can’t record sound from your computer; use Chrome or Edge to include it.';
+  if (sound === 'silent') return 'Sound from your screen is connected, but nothing is playing yet. Play something to check it’s coming through.';
+  if (surface === 'browser') return 'Only your microphone will be recorded. To include this tab’s sound, click Share again, pick the tab, and leave “Also share tab audio” on.';
+  return 'Only your microphone will be recorded. To include sound from your computer, click Share again and switch on “Also share system audio” at the bottom of the sharing window (it starts off; on a Mac it needs Chrome or Edge 141 or newer and macOS 14.2 or newer). Or share a Chrome tab with “Also share tab audio” on. If the switch is on and there’s still no sound, allow your browser in System Settings › Privacy & Security › Screen & System Audio Recording, then quit and reopen it.';
+}
+
 const BUBBLE_SIZES = { S: 0.2, M: 0.27, L: 0.36 }; // radius as a fraction of the picture's shorter side
 type BubbleSize = keyof typeof BUBBLE_SIZES;
 // The camera bubble's radius in pixels on a W×H picture.
@@ -109,6 +144,11 @@ export function ShortRecorder({
   const [elapsed, setElapsed] = useState(0);
   const [result, setResult] = useState<{ blob: Blob; url: string; durationSec: number } | null>(null);
 
+  // Is the shared screen's sound coming through, and what was shared ('browser' tab, 'window' or 'monitor').
+  const [screenSound, setScreenSound] = useState<ScreenSound | null>(null);
+  const [surface, setSurface] = useState<string | undefined>();
+  const screenMeter = useRef<AnalyserNode | null>(null);
+
   // Screen layout: whole screen with bars, or filled and cropped (with pan).
   const [fit, setFit] = useState<'contain' | 'cover'>('contain');
   const [panX, setPanX] = useState(0.5);
@@ -137,6 +177,7 @@ export function ShortRecorder({
     streams.current = [];
     audio.current?.ctx.close();
     audio.current = null;
+    screenMeter.current = null;
   }
 
   // Draw loop: runs from setup until the page closes or sources stop.
@@ -188,6 +229,19 @@ export function ShortRecorder({
     });
   }, [stage, MAX_SEC]);
 
+  // While getting ready, listen for the screen's sound actually arriving.
+  useEffect(() => {
+    const meter = screenMeter.current;
+    if (stage !== 'ready' || screenSound !== 'silent' || !meter) return;
+    const samples = new Float32Array(meter.fftSize);
+    const t = setInterval(() => {
+      meter.getFloatTimeDomainData(samples);
+      const level = Math.sqrt(samples.reduce((sum, v) => sum + v * v, 0) / samples.length);
+      if (level > 0.005) setScreenSound('heard');
+    }, 200);
+    return () => clearInterval(t);
+  }, [stage, screenSound]);
+
   // 3-2-1 before recording, so you can switch to the window you're sharing.
   useEffect(() => {
     if (stage !== 'countdown') return;
@@ -231,16 +285,33 @@ export function ShortRecorder({
       audio.current = { ctx, dest };
 
       if (chosen === 'screen') {
-        const screen = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: true });
+        const screen = await navigator.mediaDevices.getDisplayMedia(SCREEN_SHARE);
         streams.current.push(screen);
         screenVideo.current = await playIn(new MediaStream(screen.getVideoTracks()));
-        if (screen.getAudioTracks().length) ctx.createMediaStreamSource(new MediaStream(screen.getAudioTracks())).connect(dest);
+        setSurface(screen.getVideoTracks()[0].getSettings().displaySurface);
+        // The screen's sound, if the browser shared any. A meter on it tells
+        // whether anything is actually coming through before recording.
+        const sound = screen.getAudioTracks().filter((t) => t.readyState === 'live');
+        if (sound.length) {
+          const src = ctx.createMediaStreamSource(new MediaStream(sound));
+          src.connect(dest);
+          const meter = ctx.createAnalyser();
+          meter.fftSize = 1024;
+          src.connect(meter);
+          screenMeter.current = meter;
+          // On a Mac the track can end at once if the browser isn't allowed to record system audio.
+          sound[0].addEventListener('ended', () => setScreenSound('none'));
+          setScreenSound('silent');
+        } else {
+          setScreenSound('none');
+        }
         // "Stop sharing" in the browser bar ends the recording too.
         screen.getVideoTracks()[0].addEventListener('ended', () => {
           if (recorder.current?.state === 'recording') stopRecording();
         });
       } else {
         screenVideo.current = null;
+        setScreenSound(null);
       }
       setDrawing(true);
       setStage('ready');
@@ -336,7 +407,7 @@ export function ShortRecorder({
           <View style={ui.row}>
             <ModeCard
               title="Screen + camera"
-              detail="Share a screen, window or tab, with you in a bubble you can move. To show your iPhone, open iPhone Mirroring on your Mac and share that window."
+              detail="Share a screen, window or tab, with you in a bubble you can move. To include its sound, switch on “Also share system audio” (or “Also share tab audio”) when you choose what to share; Chrome or Edge only. To show your iPhone, open iPhone Mirroring on your Mac and share that window."
               onPress={() => setUp('screen')}
             />
             <ModeCard title="Camera only" detail="A normal video of you, from your webcam." onPress={() => setUp('camera')} />
@@ -402,6 +473,8 @@ export function ShortRecorder({
             <Pressable
               style={[ui.button, { backgroundColor: '#ff3b5c' }]}
               onPress={() => {
+                // Some browsers start sound processing suspended until a click.
+                void audio.current?.ctx.resume();
                 setCountdown(3);
                 setStage('countdown');
               }}
@@ -434,6 +507,17 @@ export function ShortRecorder({
         </View>
         {stage === 'ready' && mode === 'screen' && (
           <Text style={ui.hint}>After you press Start there’s a 3-second countdown, so you can switch to the window you’re sharing.</Text>
+        )}
+        {stage === 'ready' && mode === 'screen' && screenSound === 'heard' && <Text style={ui.hint}>✓ Sound from your screen is coming through.</Text>}
+        {stage === 'ready' && mode === 'screen' && screenSound !== 'heard' && (
+          <View style={ui.card}>
+            <Text style={ui.hint}>{soundHint(screenSound, surface)}</Text>
+            {canShareSound && screenSound === 'none' && (
+              <Pressable style={[ui.button, ui.secondary, { alignSelf: 'flex-start' }]} onPress={() => setUp('screen')}>
+                <Text style={ui.secondaryText}>Share again</Text>
+              </Pressable>
+            )}
+          </View>
         )}
       </View>
 
