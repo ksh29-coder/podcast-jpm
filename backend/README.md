@@ -28,6 +28,8 @@ npm test
 | GET/POST | `/api/me/shorts` | Your Shorts with review status; post one (it waits `in_review` for a host) |
 | PATCH/DELETE | `/api/me/shorts/:id` | Edit while in review; delete any time |
 | GET/POST, PATCH/DELETE | `/api/me/episodes`, `/api/me/episodes/:id` | The same for episodes (posted from the website) |
+| POST | `/api/assistant/session` | A short-lived key for one voice conversation (OpenAI Realtime, `OPENAI_API_KEY`), within the daily limit |
+| POST | `/api/assistant/usage`, `/api/assistant/tools/:name` | How long it lasted; the assistant's tools (search, episode details, latest) |
 | * | `/api/host/*` | Host mode (passcode): uploads, publishing, the review queue for posted Shorts and comments |
 | GET | `/media/*` | Media files, with HTTP Range support for seeking |
 

@@ -69,6 +69,11 @@ export default function RootLayout() {
                 // A normal page on the website, where modals don't fit this flow.
                 options={{ headerShown: false, presentation: process.env.EXPO_OS === 'web' ? 'card' : 'fullScreenModal', gestureEnabled: false }}
               />
+              {/* The voice assistant, from the mic in Search. */}
+              <Stack.Screen
+                name="assistant"
+                options={{ headerShown: false, presentation: process.env.EXPO_OS === 'web' ? 'card' : 'fullScreenModal', gestureEnabled: false }}
+              />
               {/* Host mode has its own stack and headers (src/app/host/_layout.tsx). */}
               <Stack.Screen name="host" options={{ headerShown: false }} />
             </Stack>

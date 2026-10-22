@@ -199,6 +199,14 @@ alter table shorts add column if not exists review_note text;
 -- the same way. null author for episodes hosts made.
 alter table episodes add column if not exists author_id text;
 alter table episodes add column if not exists review_note text;
+
+-- Seconds each person talked with the voice assistant each day, for the daily limit.
+create table if not exists voice_usage (
+  user_id text not null,
+  day date not null,
+  seconds int not null,
+  primary key (user_id, day)
+);
 `;
 
 // Creates the tables if needed, and fills an empty database from

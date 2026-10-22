@@ -8,6 +8,10 @@ Expo (React Native) app for iPhone and Android: build step 2–4 of the project 
 - **＋ (New)**: anyone can post a Short. Record with the camera or choose a video (Upload, bottom left),
   trim it to 90 seconds, then add details while it uploads; AI suggests the title, description, tags
   and cover from what's said. It waits for a host to approve it (Host mode → Shorts to review).
+- **Voice assistant** (mic in Search): a live spoken conversation about what's on AI Dev Wave. It
+  searches episodes, Shorts and transcripts, summarizes and recommends, and shows what it finds as
+  cards. 3 minutes per conversation, 10 minutes a day. Needs app version 1.1.0 or later (native
+  WebRTC; `plugins/withSpeakerAudio.js` sends its voice to the loudspeaker).
 - **Host mode** (shield button on Episodes): review what people post (approve, or reject with a
   note) and take things down. Uploading episodes and editing is in the website's Host Studio.
 - **Me**: your name, your Shorts and episodes with their review status (In review, Live with stats, Not approved
