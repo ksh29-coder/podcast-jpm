@@ -29,7 +29,8 @@ export default function PostPreview() {
   });
   // The real length, once the file is open (the picker doesn't always say).
   useEventListener(player, 'sourceLoad', ({ duration: d }) => {
-    if (!d) return;
+    // Browser recordings (WebM) often don't know their length; keep the recorder's.
+    if (!Number.isFinite(d) || d <= 0) return;
     setDuration(d);
     setRange((r) => ({ start: Math.min(r.start, Math.max(0, d - 1)), end: Math.min(d, picked?.durationSec ? r.end : MAX_SHORT_SEC) }));
   });
