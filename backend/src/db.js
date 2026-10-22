@@ -200,6 +200,18 @@ alter table shorts add column if not exists review_note text;
 alter table episodes add column if not exists author_id text;
 alter table episodes add column if not exists review_note text;
 
+-- Reports of episodes and Shorts by viewers. A reported post from the app or
+-- website is hidden (back in review) until a host looks at it; a host's own
+-- episode or Short stays up but is flagged for them. Approving clears them.
+create table if not exists content_reports (
+  item_type text not null check (item_type in ('episode', 'short')),
+  item_id text not null,
+  user_id text not null,
+  reason text not null default '',
+  created_at timestamptz not null default now(),
+  primary key (item_type, item_id, user_id)
+);
+
 -- Seconds each person talked with the voice assistant each day, for the daily limit.
 create table if not exists voice_usage (
   user_id text not null,

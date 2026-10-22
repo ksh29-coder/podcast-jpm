@@ -8,6 +8,7 @@ import { Icon, skipIcon } from '../../components/Icon';
 import { Scrubber } from '../../components/Scrubber';
 import { shareItem } from '../../components/engage/share';
 import { Tags } from '../../components/engage/Tags';
+import { PostMenu } from '../../components/engage/PostMenu';
 import { useLike } from '../../components/engage/useLike';
 import { api, type Episode } from '../../lib/api';
 import { formatDate, formatDuration, formatTime } from '../../lib/format';
@@ -57,6 +58,7 @@ function NowPlaying({ episode, startAt, startInVideo }: { episode: Episode; star
   }, [episode.id]);
 
   const like = useLike('episode', episode.id, episode);
+  const [menu, setMenu] = useState(false);
 
   // Audio and video share one position: switching hands it across.
   const switchMode = (next: 'audio' | 'video') => {
@@ -222,9 +224,15 @@ function NowPlaying({ episode, startAt, startInVideo }: { episode: Episode; star
                 </Pressable>
               </Glass>
             )}
+            <Glass style={styles.pill} interactive>
+              <Pressable style={styles.pillInner} onPress={() => setMenu(true)} accessibilityRole="button" accessibilityLabel="More: report or hide">
+                <Icon name="more" size={18} />
+              </Pressable>
+            </Glass>
             <Text style={[type.footnote, { marginLeft: 'auto', fontVariant: ['tabular-nums'] }]}>
               {episode.views} {episode.views === 1 ? 'view' : 'views'}
             </Text>
+            <PostMenu visible={menu} onClose={() => setMenu(false)} itemType="episode" id={episode.id} author={episode.author} />
           </View>
 
         </Columns>

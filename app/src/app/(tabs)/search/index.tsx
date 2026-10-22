@@ -4,6 +4,7 @@ import { router, Stack } from 'expo-router';
 import { EpisodeRow } from '../../../components/EpisodeRow';
 import { Icon } from '../../../components/Icon';
 import { api, type SearchResults } from '../../../lib/api';
+import { isBlocked, useBlocked } from '../../../lib/blocked';
 import { formatTime } from '../../../lib/format';
 import { usePlayer } from '../../../lib/player';
 import { colors, radius, spacing, type } from '../../../theme';
@@ -32,7 +33,10 @@ export default function SearchScreen() {
     return () => clearTimeout(t);
   }, [q]);
 
-  const data = q.length >= 2 && results?.q === q ? results.data : null;
+  const blocked = useBlocked();
+  const found = q.length >= 2 && results?.q === q ? results.data : null;
+  // Without anything from people this person hid.
+  const data = found && { ...found, episodes: found.episodes.filter((e) => !isBlocked(blocked, e)), shorts: found.shorts.filter((s) => !isBlocked(blocked, s)) };
   const loading = q.length >= 2 && results?.q !== q && !error;
   const empty = data && !data.episodes.length && !data.shorts.length && !data.moments.length;
 

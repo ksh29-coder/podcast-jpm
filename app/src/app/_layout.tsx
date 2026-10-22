@@ -69,6 +69,7 @@ export default function RootLayout() {
                 // A normal page on the website, where modals don't fit this flow.
                 options={{ headerShown: false, presentation: process.env.EXPO_OS === 'web' ? 'card' : 'fullScreenModal', gestureEnabled: false }}
               />
+              <Stack.Screen name="privacy" options={{ title: 'Privacy', headerBackTitle: 'Back', headerShown: process.env.EXPO_OS !== 'web' }} />
               {/* The voice assistant, from the mic in Search. */}
               <Stack.Screen
                 name="assistant"

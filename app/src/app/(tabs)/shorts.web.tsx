@@ -7,9 +7,11 @@ import { Scrubber } from '../../components/Scrubber';
 import { ShortVideo, type ShortVideoHandle } from '../../components/ShortVideo';
 import { shareItem } from '../../components/engage/share';
 import { Tags } from '../../components/engage/Tags';
+import { PostMenu } from '../../components/engage/PostMenu';
 import { useLike } from '../../components/engage/useLike';
 import { hovered } from '../../components/web/hover';
 import { api, type Short } from '../../lib/api';
+import { isBlocked, useBlocked } from '../../lib/blocked';
 import { usePlayer } from '../../lib/player';
 import { useFetch } from '../../lib/useFetch';
 import { colors, radius, spacing, type } from '../../theme';
@@ -19,7 +21,10 @@ import { colors, radius, spacing, type } from '../../theme';
 // (buttons, arrow keys, or the mouse wheel), like YouTube Shorts on a computer.
 export default function ShortsWeb() {
   const { id } = useLocalSearchParams<{ id?: string }>();
-  const { data, error, reload } = useFetch(api.shorts);
+  const { data: all, error, reload } = useFetch(api.shorts);
+  // Without anything from people this person hid.
+  const blocked = useBlocked();
+  const data = all && all.filter((s) => !isBlocked(blocked, s));
   const [index, setIndex] = useState<number | null>(null);
   const [box, setBox] = useState({ w: 0, h: 0 });
   const { pause } = usePlayer();
@@ -142,12 +147,15 @@ function ShortStage({ short, index, total, box, narrow }: { short: Short; index:
 
 function Actions({ short, narrow }: { short: Short; narrow: boolean }) {
   const like = useLike('short', short.id, short);
+  const [menu, setMenu] = useState(false);
   return (
     <View style={narrow ? styles.actionsNarrow : styles.actions}>
       <Action icon={like.liked ? 'heartFill' : 'heart'} color={like.liked ? colors.liked : colors.text} label={String(like.likes)} a11y={like.liked ? 'Unlike' : 'Like'} onPress={like.toggle} />
       <Action icon="comment" label={String(short.comments)} a11y="Comments" onPress={() => router.push(`/comments/short/${short.id}`)} />
       <Action icon="share" label="Share" a11y="Share" onPress={() => shareItem({ title: short.title, path: `/shorts?id=${short.id}` })} />
       <Action icon="eye" label={String(short.views)} a11y={`${short.views} views`} />
+      <Action icon="more" label="" a11y="More: report or hide" onPress={() => setMenu(true)} />
+      <PostMenu visible={menu} onClose={() => setMenu(false)} itemType="short" id={short.id} author={short.author} />
     </View>
   );
 }

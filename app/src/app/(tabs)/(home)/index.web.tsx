@@ -4,6 +4,7 @@ import { ErrorState } from '../../../components/ErrorState';
 import { Icon } from '../../../components/Icon';
 import { Grid, Page, Section } from '../../../components/web/Page';
 import { api, type Episode, type Short } from '../../../lib/api';
+import { isBlocked, useBlocked } from '../../../lib/blocked';
 import { formatDate, formatDuration } from '../../../lib/format';
 import { usePlayer } from '../../../lib/player';
 import { useFetch } from '../../../lib/useFetch';
@@ -16,10 +17,13 @@ export default function HomeWeb() {
   const episodes = useFetch(api.episodes);
   const shorts = useFetch(api.shorts);
   const { progress } = usePlayer();
+  // Without anything from people this person hid.
+  const blocked = useBlocked();
+  const shortList = shorts.data?.filter((s) => !isBlocked(blocked, s));
 
   if (episodes.error && !episodes.data) return <ErrorState message={episodes.error} onRetry={episodes.reload} />;
   if (!episodes.data) return <ActivityIndicator style={{ flex: 1, backgroundColor: colors.bg }} color={colors.text} />;
-  const [latest, ...rest] = episodes.data;
+  const [latest, ...rest] = episodes.data.filter((ep) => !isBlocked(blocked, ep));
 
   return (
     <Page>
@@ -29,7 +33,7 @@ export default function HomeWeb() {
         <Text style={type.subhead}>No episodes yet. New episodes appear here once a host publishes them.</Text>
       )}
 
-      {!!shorts.data?.length && (
+      {!!shortList?.length && (
         <Section
           title="Shorts"
           action={
@@ -39,7 +43,7 @@ export default function HomeWeb() {
           }
         >
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: spacing.lg }}>
-            {shorts.data.slice(0, 12).map((s) => (
+            {shortList.slice(0, 12).map((s) => (
               <ShortCard key={s.id} short={s} />
             ))}
           </ScrollView>

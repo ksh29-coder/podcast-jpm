@@ -14,6 +14,14 @@ const KEEP_DAYS = 7;
 
 const newId = (prefix) => `${prefix}_${crypto.randomBytes(6).toString('hex')}`;
 
+// Lets a viewer hide someone's posts without learning who (or which device)
+// they are. The same key as on comments, so one block covers both.
+const authorKey = (userId) => crypto.createHash('sha256').update(`author:${userId}`).digest('hex').slice(0, 16);
+
+// Reasons viewers gave when reporting it ('' when they gave none).
+const reportsOf = (type, alias) =>
+  `(select coalesce(json_agg(r.reason order by r.created_at), '[]') from content_reports r where r.item_type = '${type}' and r.item_id = ${alias}.id) as reports`;
+
 // Static media is stored as server-relative paths; clients need absolute URLs.
 function absolutize(url, baseUrl) {
   return url && url.startsWith('/') ? baseUrl + url : url;
@@ -23,7 +31,7 @@ const EPISODE_SELECT = `
   select e.*, v.playback_id, v.status as video_status, v.audio_ready, v.has_audio,
          v.transcript_status, v.transcript_source,
          v.duration_sec as video_duration_sec, v.error as video_error, v.suggest_status, v.suggestions,
-         p.name as author_name
+         p.name as author_name, ${reportsOf('episode', 'e')}
   from episodes e left join videos v on v.id = e.video_id
   left join profiles p on p.user_id = e.author_id`;
 
@@ -32,7 +40,7 @@ const SHORT_SELECT = `
          v.aspect_ratio, v.error as video_error, v.suggest_status, v.suggestions,
          e.title as episode_title, e.artwork_url as episode_artwork_url,
          ev.playback_id as episode_playback_id, e.thumbnail_sec as episode_thumbnail_sec,
-         p.name as author_name
+         p.name as author_name, ${reportsOf('short', 's')}
   from shorts s
   left join videos v on v.id = s.video_id
   left join profiles p on p.user_id = s.author_id
@@ -55,7 +63,7 @@ function createStore({ db, video, ai, transcriber, tint = tintFromUrl, cleanUpEv
       title: row.title,
       description: row.description || '',
       // Who posted it; null for Shorts made by hosts.
-      author: row.author_id ? { name: row.author_name || 'Someone' } : null,
+      author: row.author_id ? { name: row.author_name || 'Someone', key: authorKey(row.author_id) } : null,
       startSec: row.start_sec,
       endSec: row.end_sec,
       videoUrl: row.playback_id ? video.hlsUrl(row.playback_id) : absolutize(row.video_url, baseUrl),
@@ -75,7 +83,7 @@ function createStore({ db, video, ai, transcriber, tint = tintFromUrl, cleanUpEv
       title: row.title,
       description: row.description,
       // Who posted it; null for episodes made by hosts.
-      author: row.author_id ? { name: row.author_name || 'Someone' } : null,
+      author: row.author_id ? { name: row.author_name || 'Someone', key: authorKey(row.author_id) } : null,
       publishedAt: row.published_at && new Date(row.published_at).toISOString(),
       durationSec: row.video_duration_sec ?? row.duration_sec ?? 0,
       artworkUrl: episodeArtwork(row, baseUrl),
@@ -119,6 +127,7 @@ function createStore({ db, video, ai, transcriber, tint = tintFromUrl, cleanUpEv
       ...withHostFields(toShort(row, baseUrl), row),
       coverSec: row.cover_sec ?? null,
       reviewNote: row.review_note || null,
+      reports: parseReports(row.reports),
       aiCheck: row.author_id ? { status: row.suggest_status || 'none', concerns: row.suggestions?.concerns || [] } : null,
     };
   }
@@ -128,6 +137,7 @@ function createStore({ db, video, ai, transcriber, tint = tintFromUrl, cleanUpEv
     return {
       ...withHostFields({ ...toEpisode(row, [], baseUrl), ai: row.ai || null }, row),
       reviewNote: row.review_note || null,
+      reports: parseReports(row.reports),
       aiCheck: row.author_id ? { status: row.suggest_status || 'none', concerns: row.suggestions?.concerns || [] } : null,
     };
   }
@@ -400,7 +410,7 @@ function createStore({ db, video, ai, transcriber, tint = tintFromUrl, cleanUpEv
   // A Short and everything hanging off it: likes, views, comments, its video.
   async function removeShort(id) {
     const { rows } = await db.query('delete from shorts where id = $1 returning video_id', [id]);
-    for (const table of ['likes', 'views', 'comments']) await db.query(`delete from ${table} where item_type = 'short' and item_id = $1`, [id]);
+    for (const table of ['likes', 'views', 'comments', 'content_reports']) await db.query(`delete from ${table} where item_type = 'short' and item_id = $1`, [id]);
     if (rows[0]?.video_id) {
       const { rows: vids } = await db.query('delete from videos where id = $1 returning asset_id, source_asset_id', [rows[0].video_id]);
       await deleteAssets(vids);
@@ -410,7 +420,7 @@ function createStore({ db, video, ai, transcriber, tint = tintFromUrl, cleanUpEv
   // An episode and everything hanging off it. Shorts cut from it stay, unlinked.
   async function removeEpisode(id) {
     const { rows } = await db.query('delete from episodes where id = $1 returning video_id', [id]);
-    for (const table of ['likes', 'views', 'comments']) await db.query(`delete from ${table} where item_type = 'episode' and item_id = $1`, [id]);
+    for (const table of ['likes', 'views', 'comments', 'content_reports']) await db.query(`delete from ${table} where item_type = 'episode' and item_id = $1`, [id]);
     if (rows[0]?.video_id) {
       const { rows: vids } = await db.query('delete from videos where id = $1 returning asset_id, source_asset_id', [rows[0].video_id]);
       await deleteAssets(vids);
@@ -870,6 +880,8 @@ function createStore({ db, video, ai, transcriber, tint = tintFromUrl, cleanUpEv
         if (v && table === 'shorts' && v.duration_sec > MAX_SHORT_SEC + 0.5) {
           throw httpError(400, `A Short can be at most ${MAX_SHORT_SEC} seconds`);
         }
+        // Approving it answers any reports.
+        await db.query('delete from content_reports where item_type = $1 and item_id = $2', [table === 'episodes' ? 'episode' : 'short', id]);
         // A release time in the future schedules it; otherwise it goes live now.
         if (fields.publishAt) set.published_at = fields.publishAt;
         else if (!row.published_at || new Date(row.published_at) > new Date()) set.published_at = new Date().toISOString();
@@ -891,6 +903,11 @@ function createStore({ db, video, ai, transcriber, tint = tintFromUrl, cleanUpEv
     );
     return true;
   }
+}
+
+// json_agg comes back parsed from Postgres, as text from some drivers.
+function parseReports(value) {
+  return typeof value === 'string' ? JSON.parse(value) : value || [];
 }
 
 function httpError(status, message) {

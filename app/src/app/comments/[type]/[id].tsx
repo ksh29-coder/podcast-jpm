@@ -3,7 +3,8 @@ import { ActivityIndicator, FlatList, Keyboard, Platform, Pressable, StyleSheet,
 import { router, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api, type Comment, type ItemType } from '../../../lib/api';
-import { getBlocked, getDisplayName, saveBlocked, saveDisplayName } from '../../../lib/device';
+import { blockAuthor, unblockAll, useBlocked } from '../../../lib/blocked';
+import { getDisplayName, saveDisplayName } from '../../../lib/device';
 import { formatDate, formatTime } from '../../../lib/format';
 import { usePlayer } from '../../../lib/player';
 import { useFetch } from '../../../lib/useFetch';
@@ -25,7 +26,8 @@ export default function CommentsScreen() {
   const [body, setBody] = useState('');
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
-  const [blocked, setBlocked] = useState<string[]>([]);
+  // Shared with the feeds: hiding someone here hides their posts too.
+  const blocked = useBlocked();
   const [hidden, setHidden] = useState<string[]>([]);
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -55,7 +57,6 @@ export default function CommentsScreen() {
         setHasSavedName(true);
       }
     });
-    getBlocked().then(setBlocked);
   }, []);
 
   const send = async () => {
@@ -89,10 +90,8 @@ export default function CommentsScreen() {
   const block = async (c: Comment) => {
     setMenuFor(null);
     if (!c.authorKey) return;
-    const next = [...new Set([...blocked, c.authorKey])];
-    setBlocked(next);
-    await saveBlocked(next);
-    setNotice(`You won’t see comments from ${c.authorName} any more.`);
+    await blockAuthor(c.authorKey);
+    setNotice(`You won’t see comments or posts from ${c.authorName} any more.`);
   };
 
   // Close the sheet and play from that moment; the mini player (or Now
@@ -146,10 +145,7 @@ export default function CommentsScreen() {
             ListFooterComponent={
               blocked.length > 0 ? (
                 <Pressable
-                  onPress={async () => {
-                    setBlocked([]);
-                    await saveBlocked([]);
-                  }}
+                  onPress={() => unblockAll()}
                   accessibilityRole="button"
                 >
                   <Text style={[styles.hint, { textAlign: 'center', paddingTop: spacing.lg }]}>

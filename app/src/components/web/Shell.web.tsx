@@ -23,7 +23,7 @@ const TABS: Tab[] = [
 ];
 
 // Pages opened on top of a tab, which get a Back button.
-const DETAIL = /^\/(episode|comments|transcript|playback)(\/|$)/;
+const DETAIL = /^\/(episode|comments|transcript|playback|privacy)(\/|$)/;
 
 export function Shell({ children }: { children: ReactNode }) {
   const path = usePathname();

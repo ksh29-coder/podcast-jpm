@@ -108,13 +108,16 @@ test('an upload gets suggestions from what is said, then waits for review', asyn
   // The host sees it with the uploader and the AI's check, and approves it with a fix.
   const queued = (await host('GET', '/shorts')).body.find((s) => s.id === posted.body.id);
   assert.strictEqual(queued.status, 'in_review');
-  assert.deepStrictEqual(queued.author, { name: 'Alice K' });
+  assert.strictEqual(queued.author.name, 'Alice K');
   assert.deepStrictEqual(queued.aiCheck, { status: 'ready', concerns: ['0:04 names a client'] });
   const approved = await host('PATCH', `/shorts/${posted.body.id}`, { title: 'Kubernetes operators, quickly', status: 'published' });
   assert.strictEqual(approved.status, 200);
 
   const live = (await bob('GET', '/api/shorts')).body.find((s) => s.id === posted.body.id);
-  assert.deepStrictEqual(live.author, { name: 'Alice K' });
+  assert.strictEqual(live.author.name, 'Alice K');
+  // A key to hide Alice's posts with, which doesn't reveal her device.
+  assert.match(live.author.key, /^[0-9a-f]{16}$/);
+  assert.ok(!live.author.key.includes(ALICE.slice(0, 8)));
   assert.strictEqual(live.title, 'Kubernetes operators, quickly');
   assert.strictEqual(live.description, 'A tip');
 
@@ -260,6 +263,29 @@ test('anyone can post an episode too; it waits for review', async () => {
 
   assert.strictEqual((await alice('DELETE', `/api/me/episodes/${posted.body.id}`)).status, 204);
   assert.strictEqual((await bob('GET', `/api/episodes/${posted.body.id}`)).status, 404);
+});
+
+test('reporting a posted Short hides it for review; a host’s own stays up, flagged', async () => {
+  video.state.durationSec = 30;
+  const up = await alice('POST', '/api/me/uploads', {});
+  const posted = await alice('POST', '/api/me/shorts', { videoId: up.body.videoId, title: 'Reported one' });
+  await host('PATCH', `/shorts/${posted.body.id}`, { status: 'published' });
+  assert.strictEqual((await bob('POST', `/api/items/short/${posted.body.id}/report`, { reason: 'Shows a client name' })).status, 204);
+  assert.ok(!(await bob('GET', '/api/shorts')).body.some((s) => s.id === posted.body.id));
+  const queued = (await host('GET', '/shorts')).body.find((s) => s.id === posted.body.id);
+  assert.deepStrictEqual([queued.status, queued.reports], ['in_review', ['Shows a client name']]);
+  // Approving it again answers the report.
+  await host('PATCH', `/shorts/${posted.body.id}`, { status: 'published' });
+  assert.deepStrictEqual((await host('GET', '/shorts')).body.find((s) => s.id === posted.body.id).reports, []);
+
+  const hostUp = await host('POST', '/uploads', { kind: 'short' });
+  const hostShort = await host('POST', '/shorts', { title: 'Host clip 2', videoId: hostUp.body.videoId });
+  await host('PATCH', `/shorts/${hostShort.body.id}`, { status: 'published' });
+  await bob('POST', `/api/items/short/${hostShort.body.id}/report`, {});
+  assert.ok((await bob('GET', '/api/shorts')).body.some((s) => s.id === hostShort.body.id));
+  assert.deepStrictEqual((await host('GET', '/shorts')).body.find((s) => s.id === hostShort.body.id).reports, ['']);
+  // Only live things can be reported.
+  assert.strictEqual((await bob('POST', '/api/items/short/sh_nope/report', {})).status, 404);
 });
 
 test('the host’s own Shorts have no author', async () => {
