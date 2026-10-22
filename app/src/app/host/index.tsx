@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Image, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
+import { AiCheckLine } from '../../components/host/AiCheckLine';
 import { useHost } from '../../components/host/HostGate';
 import { Icon } from '../../components/Icon';
 import { ui } from '../../components/host/ui';
@@ -77,6 +78,10 @@ export default function HostHome() {
     return error ? <Text style={[ui.error, { padding: 20 }]}>{error}</Text> : <ActivityIndicator style={{ flex: 1 }} color={colors.accent} />;
   }
 
+  // Posted from the app and waiting for a host; everything else is below.
+  const toReview = shorts.filter((s) => s.author && s.status === 'in_review');
+  const otherShorts = shorts.filter((s) => !toReview.includes(s));
+
   return (
     <ScrollView
       contentContainerStyle={ui.page}
@@ -124,6 +129,28 @@ export default function HostHome() {
           : 'Upload Shorts from your phone here. Long episodes are uploaded, and Shorts cut from them, on the host website.'}
       </Text>
       {error && <Text style={ui.error}>{error}</Text>}
+
+      {toReview.length > 0 && (
+        <>
+          <Text style={ui.section}>Shorts to review ({toReview.length})</Text>
+          <Text style={ui.hint}>Posted from the app. Nobody else sees them until you approve them.</Text>
+          {toReview.map((s) => (
+            <Pressable key={s.id} style={[ui.card, styles.card]} onPress={() => router.push(`/host/review/${s.id}`)} accessibilityRole="button">
+              {s.artworkUrl && !videoLabel(s.video) ? <Image source={{ uri: s.artworkUrl }} style={styles.thumb} /> : <View style={styles.thumb} />}
+              <View style={styles.body}>
+                <Text style={styles.title} numberOfLines={2}>
+                  {s.title}
+                </Text>
+                <Text style={ui.hint}>
+                  by {s.author?.name} · {formatWhen(s.createdAt)}
+                </Text>
+                <AiCheckLine check={s.aiCheck} />
+                {videoLabel(s.video) && <Text style={ui.hint}>{videoLabel(s.video)}</Text>}
+              </View>
+            </Pressable>
+          ))}
+        </>
+      )}
 
       {comments.length > 0 && (
         <>
@@ -186,14 +213,14 @@ export default function HostHome() {
       ))}
 
       <Text style={ui.section}>Shorts</Text>
-      {shorts.length === 0 && <Text style={ui.hint}>No Shorts yet.</Text>}
-      {shorts.map((s) => (
+      {otherShorts.length === 0 && <Text style={ui.hint}>No Shorts yet.</Text>}
+      {otherShorts.map((s) => (
         <ItemCard
           key={s.id}
           title={s.title}
           imageUrl={s.artworkUrl}
           meta={[
-            s.episodeTitle ? `From “${s.episodeTitle}”` : 'Uploaded',
+            s.author ? `by ${s.author.name}` : s.episodeTitle ? `From “${s.episodeTitle}”` : 'Uploaded',
             s.startSec != null && s.endSec != null ? `${formatTime(s.startSec)}–${formatTime(s.endSec)}` : null,
             s.tags.map((t) => `#${t}`).join(' ') || null,
           ]

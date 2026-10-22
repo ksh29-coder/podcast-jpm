@@ -44,6 +44,7 @@ export default function HostLayout() {
         <Stack.Screen name="ai/[id]" options={{ title: 'AI assist' }} />
         <Stack.Screen name="episode/[id]" options={{ title: 'Edit episode' }} />
         <Stack.Screen name="short/[id]" options={{ title: 'Edit Short' }} />
+        <Stack.Screen name="review/[id]" options={{ title: 'Review Short' }} />
       </Stack>
     </HostGate>
   );

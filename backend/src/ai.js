@@ -1,35 +1,54 @@
-// AI help for hosts, through OpenRouter (model from OPENROUTER_MODEL).
-// Reads an episode's transcript and suggests a summary, chapters, tags,
-// things mentioned, and moments that would make good Shorts. Suggestions
-// are checked here and only reach listeners when a host applies them.
+// AI help, through OpenRouter (model from OPENROUTER_MODEL).
+// For hosts: reads an episode's transcript and suggests a summary, chapters,
+// tags, things mentioned, and moments that would make good Shorts.
+// For anyone posting a Short: suggests its details from what's said, and
+// checks it for the host who reviews it.
+// Suggestions are checked here and only reach viewers once a person accepts them.
 
 const KINDS = ['tool', 'product', 'company', 'person', 'paper', 'concept'];
 
 function openRouterAi({ apiKey = process.env.OPENROUTER_API_KEY, model = process.env.OPENROUTER_MODEL || 'z-ai/glm-5.2' } = {}) {
+  // One JSON reply from the model.
+  async function ask({ system, user, maxTokens }) {
+    if (!apiKey) throw Object.assign(new Error('AI isn’t set up on this server'), { status: 503 });
+    const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json', 'X-Title': 'AI Dev Wave' },
+      body: JSON.stringify({
+        model,
+        response_format: { type: 'json_object' },
+        reasoning: { effort: 'low' },
+        max_tokens: maxTokens,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: user },
+        ],
+      }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || json.error) {
+      throw Object.assign(new Error(`AI request failed: ${json.error?.message || res.status}`), { status: 502 });
+    }
+    const content = json.choices?.[0]?.message?.content || '';
+    try {
+      // Some models wrap JSON in a code fence despite being asked not to.
+      return JSON.parse(content.replace(/^```(?:json)?\s*|\s*```$/g, ''));
+    } catch {
+      throw Object.assign(new Error('The AI reply wasn’t valid JSON'), { status: 502 });
+    }
+  }
+
   return {
     model,
     async episodeInsights({ title, description, durationSec, cues }) {
-      if (!apiKey) throw Object.assign(new Error('AI isn’t set up on this server'), { status: 503 });
       const hasSpeakers = cues.some((c) => Number.isInteger(c.speaker));
       const lines = cues.map((c) => `[${Math.floor(c.startSec)}s]${Number.isInteger(c.speaker) ? ` S${c.speaker}:` : ''} ${c.text}`).join('\n');
-      const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json', 'X-Title': 'AI Dev Wave' },
-        body: JSON.stringify({
-          model,
-          response_format: { type: 'json_object' },
-          reasoning: { effort: 'low' },
-          max_tokens: 8000,
-          messages: [
-            {
-              role: 'system',
-              content:
-                'You help the hosts of an internal software-engineering podcast. You turn an episode transcript into structured metadata. ' +
-                'Only use what is actually said in the transcript. Reply with one JSON object and nothing else.',
-            },
-            {
-              role: 'user',
-              content: `Episode title: ${title}
+      return ask({
+        maxTokens: 8000,
+        system:
+          'You help the hosts of an internal software-engineering podcast. You turn an episode transcript into structured metadata. ' +
+          'Only use what is actually said in the transcript. Reply with one JSON object and nothing else.',
+        user: `Episode title: ${title}
 Description: ${description || '(none)'}
 Length: ${Math.round(durationSec)} seconds
 Transcript (each line starts with its time in seconds${hasSpeakers ? ' and speaker label' : ''}):
@@ -42,21 +61,27 @@ Return JSON with exactly these keys:
 - "mentions": tools, products, companies, people, papers or concepts that are explicitly named, [{"startSec": number, "name": string, "kind": one of ${KINDS.join(', ')}, "url": official https homepage if you are certain, else null}].
 - "speakers": ${hasSpeakers ? 'the name of each speaker label (S0, S1…) when the transcript makes it clear (for example someone says "I\'m your host, Kai"), as {"0": "Kai"}; leave out speakers you can\'t name' : '{}'}.
 - "shorts": 1–4 self-contained moments of 20–90 seconds that would work as standalone vertical clips, [{"startSec": number, "endSec": number, "title": string (max 70 chars), "why": string (one sentence)}].`,
-            },
-          ],
-        }),
       });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok || json.error) {
-        throw Object.assign(new Error(`AI request failed: ${json.error?.message || res.status}`), { status: 502 });
-      }
-      const content = json.choices?.[0]?.message?.content || '';
-      try {
-        // Some models wrap JSON in a code fence despite being asked not to.
-        return JSON.parse(content.replace(/^```(?:json)?\s*|\s*```$/g, ''));
-      } catch {
-        throw Object.assign(new Error('The AI reply wasn’t valid JSON'), { status: 502 });
-      }
+    },
+
+    // Details for a Short someone is posting, and a check for the reviewing host.
+    async shortSuggestions({ durationSec, cues }) {
+      const lines = cues.map((c) => `[${Math.floor(c.startSec)}s] ${c.text}`).join('\n');
+      return ask({
+        maxTokens: 3000,
+        system:
+          'You help people share short videos about AI and software-engineering best practices with colleagues in an internal app. ' +
+          'Only use what is actually said in the transcript. Reply with one JSON object and nothing else.',
+        user: `A ${Math.round(durationSec)}-second vertical video. Transcript (each line starts with its time in seconds):
+${lines}
+
+Return JSON with exactly these keys:
+- "title": a clear, specific title of at most 70 characters, no hashtags or emoji.
+- "description": 1–3 plain sentences on the tip or practice it shares.
+- "tags": 3–5 short lowercase topic tags.
+- "coverSec": the second that best shows what the video is about, for its cover image.
+- "concerns": things a reviewer should check before it's shown to everyone: possible confidential or client information (client or project names, account numbers, internal hostnames, credentials, personal data), content not about software or AI, or offensive language. Each is one short sentence starting with its time, e.g. "0:12 names a client". [] when there's nothing.`,
+      });
     },
   };
 }
@@ -116,4 +141,21 @@ function cleanInsights(raw, { durationSec, cues }) {
   return { summary: str(r.summary, 800), chapters: chapters.slice(0, 12), tags, mentions: mentions.slice(0, 25), shorts: shorts.slice(0, 4), speakers };
 }
 
-module.exports = { openRouterAi, cleanInsights };
+// Checks and tidies the suggestions for a Short. The cover frame stays
+// inside the video; without one it's the middle.
+function cleanSuggestions(raw, { durationSec }) {
+  const r = raw && typeof raw === 'object' ? raw : {};
+  const str = (v, max) => (typeof v === 'string' ? v.trim().replace(/\s+/g, ' ').slice(0, max) : '');
+  const list = (v) => (Array.isArray(v) ? v : []);
+  const cover = typeof r.coverSec === 'number' && Number.isFinite(r.coverSec) && r.coverSec >= 0 && r.coverSec < durationSec ? r.coverSec : durationSec / 2;
+  return {
+    title: str(r.title, 100),
+    description: str(r.description, 500),
+    // One word each, like the ones people type: "ai coding" -> "ai-coding".
+    tags: [...new Set(list(r.tags).map((t) => str(t, 30).toLowerCase().replace(/^#+/, '').replace(/\s+/g, '-')).filter(Boolean))].slice(0, 5),
+    coverSec: Math.round(cover * 10) / 10,
+    concerns: list(r.concerns).map((c) => str(c, 200)).filter(Boolean).slice(0, 6),
+  };
+}
+
+module.exports = { openRouterAi, cleanInsights, cleanSuggestions };

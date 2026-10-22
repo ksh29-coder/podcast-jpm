@@ -43,7 +43,20 @@ type HostFields = { status: Status; video: VideoState | null; createdAt: string;
 export type Reach = { listeners: number; durationSec: number; points: { percent: number; atSec: number; listeners: number; share: number }[] };
 export type HostEpisode = Omit<Episode, 'clips'> &
   HostFields & { thumbnailSec?: number; ai?: AiSuggestions | null; speakers?: Record<string, string>; transcriptSpeakers?: string[]; clips: HostShort[] };
-export type HostShort = Clip & HostFields & Stats & { episodeId: string | null; episodeTitle: string | null; artworkUrl: string | null };
+export type HostShort = Clip &
+  HostFields &
+  Stats & {
+    episodeId: string | null;
+    episodeTitle: string | null;
+    artworkUrl: string | null;
+    description: string;
+    // Posted from the app by someone (null when a host made it).
+    author: { name: string } | null;
+    coverSec: number | null;
+    reviewNote: string | null;
+    // The AI's check of what's said, for posted Shorts.
+    aiCheck: { status: 'none' | 'generating' | 'ready' | 'unavailable'; concerns: string[] } | null;
+  };
 
 export const MAX_SHORT_SEC = 90;
 
@@ -107,7 +120,10 @@ export function hostApi(passcode: string) {
     clipShort: (body: { episodeId: string; title: string; startSec: number; endSec: number; focusX: number; tags: string[] }) =>
       call<HostShort>('POST', '/shorts', body),
     uploadShort: (body: { videoId: string; title: string; episodeId?: string; focusX?: number; tags: string[] }) => call<HostShort>('POST', '/shorts', body),
-    updateShort: (id: string, body: Partial<{ title: string; focusX: number; tags: string[]; status: Status; publishAt: string }>) =>
+    updateShort: (
+      id: string,
+      body: Partial<{ title: string; description: string; focusX: number; tags: string[]; coverSec: number; status: Status; publishAt: string; reviewNote: string | null }>
+    ) =>
       call<HostShort>('PATCH', `/shorts/${id}`, body),
     reach: (id: string) => call<Reach>('GET', `/episodes/${id}/reach`),
     comments: () => call<HostComment[]>('GET', '/comments'),

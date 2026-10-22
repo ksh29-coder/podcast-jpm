@@ -69,15 +69,16 @@ function muxVideo({
 
     // A one-time URL the phone or browser PUTs the file to, so the file
     // never passes through our backend. `audio` also makes an audio-only file
-    // for the episode's audio mode.
-    async createUpload({ audio = false } = {}) {
+    // for the episode's audio mode. Without `captions` (for a video that will
+    // be cut, since the cut gets its own) no captions are made.
+    async createUpload({ audio = false, captions = true } = {}) {
       const data = await call('POST', '/uploads', {
         cors_origin: process.env.UPLOAD_CORS_ORIGIN || '*',
         new_asset_settings: {
           playback_policies: [policy],
           video_quality: 'basic',
           // Speech-to-text captions; they double as the transcript.
-          inputs: [{ generated_subtitles: [{ language_code: 'en', name: 'English (generated)' }] }],
+          ...(captions && { inputs: [{ generated_subtitles: [{ language_code: 'en', name: 'English (generated)' }] }] }),
           ...(audio && { static_renditions: [{ resolution: 'audio-only' }] }),
         },
       });
@@ -92,10 +93,18 @@ function muxVideo({
     },
 
     // A new video cut from an existing one (ours) or from a public URL
-    // (the seeded episodes' static MP4s).
-    async createClip({ assetId, sourceUrl, startSec, endSec }) {
+    // (the seeded episodes' static MP4s). `captions` asks for speech-to-text
+    // captions on the new video, as uploads get.
+    async createClip({ assetId, sourceUrl, startSec, endSec, captions = false }) {
       const data = await call('POST', '/assets', {
-        inputs: [{ url: assetId ? `mux://assets/${assetId}` : sourceUrl, start_time: startSec, end_time: endSec }],
+        inputs: [
+          {
+            url: assetId ? `mux://assets/${assetId}` : sourceUrl,
+            start_time: startSec,
+            end_time: endSec,
+            ...(captions && { generated_subtitles: [{ language_code: 'en', name: 'English (generated)' }] }),
+          },
+        ],
         playback_policies: [policy],
         video_quality: 'basic',
       });
@@ -120,6 +129,11 @@ function muxVideo({
         textTrack: text ? { id: text.id, status: text.status } : null,
         hasAudioTrack: (data.tracks || []).some((t) => t.type === 'audio'),
       };
+    },
+
+    // Gone for good, with its files and links.
+    async deleteAsset(assetId) {
+      await call('DELETE', `/assets/${assetId}`);
     },
 
     // Ask for captions on a video uploaded before captions were switched on.

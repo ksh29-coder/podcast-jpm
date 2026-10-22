@@ -55,6 +55,8 @@ export default function RootLayout() {
             name="transcript/[id]"
             options={{ presentation: 'formSheet', sheetAllowedDetents: [0.85, 1], sheetGrabberVisible: true, headerShown: false }}
           />
+          {/* The ＋ tab: camera, trim and details, over everything. */}
+          <Stack.Screen name="post" options={{ headerShown: false, presentation: 'fullScreenModal', gestureEnabled: false }} />
           {/* Host mode has its own stack and headers (src/app/host/_layout.tsx). */}
           <Stack.Screen name="host" options={{ headerShown: false }} />
         </Stack>

@@ -7,7 +7,7 @@ import { formatTime } from '../../lib/format';
 import { MAX_SHORT_SEC } from '../../lib/host';
 import { colors } from '../../theme';
 import { Icon, type IconName } from '../Icon';
-import { setRecording } from './recording';
+import { setRecording, type Recording } from './recording';
 
 type Phase = 'idle' | 'countdown' | 'recording' | 'paused' | 'saving';
 const TIMERS = [0, 3, 10];
@@ -16,7 +16,10 @@ const SCROLL_SPEEDS = [20, 35, 55]; // teleprompter, pixels per second
 // Full-screen camera for Shorts, like the YouTube Shorts / Reels camera:
 // countdown timer, flip, flash, a scrolling script, and (iOS 18+ / Android)
 // pausing between takes so one Short can be filmed in several bits.
-export function ShortRecorder() {
+//
+// Used by Host mode as a screen of its own, and by the ＋ tab, which passes
+// what to do with a recording and adds a button to choose a video instead.
+export function ShortRecorder({ onRecorded, onPickFromLibrary }: { onRecorded?: (r: Recording) => void; onPickFromLibrary?: () => void } = {}) {
   const insets = useSafeAreaInsets();
   // Opened straight from Host mode (next=upload): continue to the details
   // screen afterwards. Opened from that screen: just go back to it.
@@ -100,7 +103,12 @@ export function ShortRecorder() {
           <Text style={styles.permButtonText}>Allow camera and microphone</Text>
         </Pressable>
         {(!camPerm.canAskAgain || !micPerm.canAskAgain) && (
-          <Text style={styles.permHint}>If nothing happens, turn them on for Expo Go in the Settings app.</Text>
+          <Text style={styles.permHint}>If nothing happens, turn them on for AI Dev Wave in the Settings app.</Text>
+        )}
+        {onPickFromLibrary && (
+          <Pressable style={[styles.permButton, { backgroundColor: 'rgba(255,255,255,0.18)' }]} onPress={onPickFromLibrary}>
+            <Text style={[styles.permButtonText, { color: '#fff' }]}>Choose a video instead</Text>
+          </Pressable>
         )}
         <Pressable onPress={() => router.back()}>
           <Text style={styles.permHint}>Cancel</Text>
@@ -125,9 +133,15 @@ export function ShortRecorder() {
       .recordAsync({ maxDuration: MAX_SHORT_SEC })
       .then((result) => {
         if (result?.uri) {
-          setRecording({ uri: result.uri, durationSec: Math.min(MAX_SHORT_SEC, before.current) });
-          if (next === 'upload') router.replace('/host/upload-short');
-          else router.back();
+          const rec = { uri: result.uri, durationSec: Math.min(MAX_SHORT_SEC, before.current) };
+          if (onRecorded) {
+            setPhase('idle');
+            onRecorded(rec);
+          } else {
+            setRecording(rec);
+            if (next === 'upload') router.replace('/host/upload-short');
+            else router.back();
+          }
         } else {
           setPhase('idle');
         }
@@ -238,7 +252,16 @@ export function ShortRecorder() {
         {phase === 'paused' && <Text style={styles.hint}>Paused. Reframe, then tap to record the next bit.</Text>}
         {phase === 'recording' && !canPause && <Text style={styles.hint}>Tap to stop.</Text>}
         <View style={styles.controls}>
-          <View style={{ width: 64 }} />
+          {onPickFromLibrary && phase === 'idle' ? (
+            <Pressable onPress={onPickFromLibrary} style={styles.gallery} accessibilityRole="button" accessibilityLabel="Choose a video from your library">
+              <View style={styles.galleryIcon}>
+                <Icon name="photos" size={24} color="#fff" />
+              </View>
+              <Text style={styles.galleryText}>Upload</Text>
+            </Pressable>
+          ) : (
+            <View style={{ width: 64 }} />
+          )}
           <Pressable
             onPress={pressRecord}
             disabled={phase === 'saving'}
@@ -326,6 +349,9 @@ const styles = StyleSheet.create({
   recordOuter: { width: 82, height: 82, borderRadius: 41, borderWidth: 5, borderColor: '#fff', alignItems: 'center', justifyContent: 'center' },
   recordDot: { width: 62, height: 62, borderRadius: 31, backgroundColor: '#ff3b5c' },
   recordStop: { width: 30, height: 30, borderRadius: 6, backgroundColor: '#ff3b5c' },
+  gallery: { width: 64, alignItems: 'center', gap: 4 },
+  galleryIcon: { width: 48, height: 48, borderRadius: 12, borderWidth: 2, borderColor: '#fff', backgroundColor: 'rgba(0,0,0,0.35)', alignItems: 'center', justifyContent: 'center' },
+  galleryText: { color: '#fff', fontSize: 12, fontWeight: '700', textShadowColor: 'rgba(0,0,0,0.6)', textShadowRadius: 4 },
   done: { width: 64, height: 64, borderRadius: 32, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' },
   scriptPanel: { backgroundColor: colors.bg, padding: 20, gap: 12 },
   scriptTitle: { color: colors.text, fontSize: 22, fontWeight: '800' },

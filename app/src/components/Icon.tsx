@@ -44,6 +44,12 @@ const ICONS = {
   minus: { sf: 'minus', ion: 'remove' },
   link: { sf: 'arrow.up.right.square', ion: 'open-outline' },
   plus: { sf: 'plus', ion: 'add' },
+  photos: { sf: 'photo.on.rectangle', ion: 'images-outline' },
+  sparkles: { sf: 'sparkles', ion: 'sparkles-outline' },
+  trash: { sf: 'trash', ion: 'trash-outline' },
+  edit: { sf: 'pencil', ion: 'pencil' },
+  chevronRight: { sf: 'chevron.right', ion: 'chevron-forward' },
+  warning: { sf: 'exclamationmark.triangle', ion: 'warning-outline' },
 } as const satisfies Record<string, { sf: SFSymbol; ion: keyof typeof Ionicons.glyphMap }>;
 
 export type IconName = keyof typeof ICONS;

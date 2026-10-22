@@ -1,13 +1,16 @@
 const crypto = require('crypto');
 const { tintFromUrl } = require('./tint');
 const { parseVtt } = require('./vtt');
-const { cleanInsights } = require('./ai');
+const { cleanInsights, cleanSuggestions } = require('./ai');
 const { cuesToVtt } = require('./transcribe');
 
 // Database access and the JSON shapes the app sees. Media is either a static
 // file under /media (the seeded episodes) or a video on the video service.
 
 const MAX_SHORT_SEC = 90;
+// Rejected Shorts and uploads nobody posted are deleted (with their videos)
+// after this long, to keep video storage free.
+const KEEP_DAYS = 7;
 
 const newId = (prefix) => `${prefix}_${crypto.randomBytes(6).toString('hex')}`;
 
@@ -24,15 +27,17 @@ const EPISODE_SELECT = `
 
 const SHORT_SELECT = `
   select s.*, v.playback_id, v.status as video_status, v.duration_sec as video_duration_sec,
-         v.aspect_ratio, v.error as video_error,
+         v.aspect_ratio, v.error as video_error, v.suggest_status, v.suggestions,
          e.title as episode_title, e.artwork_url as episode_artwork_url,
-         ev.playback_id as episode_playback_id, e.thumbnail_sec as episode_thumbnail_sec
+         ev.playback_id as episode_playback_id, e.thumbnail_sec as episode_thumbnail_sec,
+         p.name as author_name
   from shorts s
   left join videos v on v.id = s.video_id
+  left join profiles p on p.user_id = s.author_id
   left join episodes e on e.id = s.episode_id
   left join videos ev on ev.id = e.video_id`;
 
-function createStore({ db, video, ai, transcriber, tint = tintFromUrl }) {
+function createStore({ db, video, ai, transcriber, tint = tintFromUrl, cleanUpEveryMs = 10 * 60_000 }) {
   function episodeArtwork(row, baseUrl) {
     return row.playback_id ? video.thumbnailUrl(row.playback_id, row.thumbnail_sec) : absolutize(row.artwork_url, baseUrl);
   }
@@ -42,10 +47,13 @@ function createStore({ db, video, ai, transcriber, tint = tintFromUrl }) {
       ? video.thumbnailUrl(row.episode_playback_id, row.episode_thumbnail_sec)
       : row.episode_artwork_url
         ? absolutize(row.episode_artwork_url, baseUrl)
-        : row.playback_id && video.thumbnailUrl(row.playback_id, 0);
+        : row.playback_id && video.thumbnailUrl(row.playback_id, row.cover_sec ?? 0);
     return {
       id: row.id,
       title: row.title,
+      description: row.description || '',
+      // Who posted it; null for Shorts made by hosts.
+      author: row.author_id ? { name: row.author_name || 'Someone' } : null,
       startSec: row.start_sec,
       endSec: row.end_sec,
       videoUrl: row.playback_id ? video.hlsUrl(row.playback_id) : absolutize(row.video_url, baseUrl),
@@ -100,6 +108,17 @@ function createStore({ db, video, ai, transcriber, tint = tintFromUrl }) {
     };
   }
 
+  // A Short as hosts and its uploader see it: status, the uploader, the AI's
+  // check, and the host's note when it wasn't approved.
+  function toManagedShort(row, baseUrl) {
+    return {
+      ...withHostFields(toShort(row, baseUrl), row),
+      coverSec: row.cover_sec ?? null,
+      reviewNote: row.review_note || null,
+      aiCheck: row.author_id ? { status: row.suggest_status || 'none', concerns: row.suggestions?.concerns || [] } : null,
+    };
+  }
+
   // Work out (once) the backdrop color for episodes that don't have one yet.
   async function fillTints(rows, baseUrl) {
     const missing = rows.filter((r) => !r.tint);
@@ -146,6 +165,33 @@ function createStore({ db, video, ai, transcriber, tint = tintFromUrl }) {
     }
     if (assetId) {
       const a = await video.getAsset(assetId);
+      // Keep only the part the uploader chose: cut it into a new video and
+      // delete the original. Claimed in the database so it happens once.
+      if (a.status === 'ready' && row.trim_start != null) {
+        const { rows: claimed } = await db.query(
+          `update videos v set trim_start = null, trim_end = null
+           from (select id, trim_start, trim_end from videos where id = $1 and trim_start is not null for update) old
+           where v.id = old.id returning old.trim_start, old.trim_end`,
+          [row.id]
+        );
+        const range = claimed[0];
+        if (range) {
+          const end = Math.min(range.trim_end, a.durationSec ?? range.trim_end);
+          if (range.trim_start > 0.2 || end < (a.durationSec ?? end) - 0.2) {
+            const clip = await video.createClip({ assetId, startSec: range.trim_start, endSec: end, captions: true }).catch(async (e) => {
+              // Try again on the next check rather than keep the whole video.
+              await db.query('update videos set trim_start = $2, trim_end = $3 where id = $1', [row.id, range.trim_start, range.trim_end]);
+              throw e;
+            });
+            // The original is deleted once the cut is ready (it's made from it).
+            await db.query(
+              "update videos set asset_id = $2, source_asset_id = $3, status = 'processing', playback_id = null, duration_sec = null where id = $1",
+              [row.id, clip.assetId, assetId]
+            );
+            return;
+          }
+        }
+      }
       Object.assign(patch, {
         status: a.status,
         playback_id: a.playbackId,
@@ -154,6 +200,10 @@ function createStore({ db, video, ai, transcriber, tint = tintFromUrl }) {
         audio_ready: a.audioReady,
         error: a.error,
       });
+      if (row.source_asset_id && a.status !== 'processing') {
+        await video.deleteAsset(row.source_asset_id).catch((e) => console.warn('delete original', row.source_asset_id, e.message));
+        patch.source_asset_id = null;
+      }
       // A video with no sound gets no audio file; the episode is video-only.
       if (a.audioReady) patch.has_audio = true;
       if (a.audioMissing) patch.has_audio = false;
@@ -269,6 +319,83 @@ function createStore({ db, video, ai, transcriber, tint = tintFromUrl }) {
     await db.query('update episodes set ai = $2, updated_at = now() where id = $1', [episodeId, JSON.stringify(insights)]);
   }
 
+  // Moves a posted (or still being posted) Short's video along: processing,
+  // captions, then the AI's suggestions and check. Called while the uploader
+  // waits on the details screen and when a host opens the review queue, since
+  // there are no background jobs. Returns the fresh video row.
+  async function advanceUpload(videoId) {
+    await syncVideos([videoId]);
+    let v = (await db.query('select * from videos where id = $1', [videoId])).rows[0];
+    if (!v || v.status !== 'ready' || ['ready', 'unavailable'].includes(v.suggest_status)) return v;
+    const finish = async (status, suggestions) => {
+      await db.query('update videos set suggest_status = $2, suggestions = $3 where id = $1', [videoId, status, JSON.stringify(suggestions)]);
+      return (await db.query('select * from videos where id = $1', [videoId])).rows[0];
+    };
+    const durationSec = v.duration_sec || 0;
+    const transcript = await ensureTranscript(v);
+    // Nothing said, or no AI here: just a cover frame from the middle.
+    if (transcript === 'unavailable' || !ai) return finish('unavailable', { coverSec: Math.round(durationSec * 5) / 10, concerns: [] });
+    if (transcript !== 'ready') return v;
+    // One request at a time; a stuck one is retried after two minutes.
+    const { rowCount } = await db.query(
+      `update videos set suggest_status = 'generating', suggest_started_at = now()
+       where id = $1 and (suggest_status = 'none' or (suggest_status = 'generating' and suggest_started_at < now() - interval '2 minutes'))`,
+      [videoId]
+    );
+    if (!rowCount) return v;
+    try {
+      const { rows } = await db.query('select start_sec, end_sec, text from transcript_cues where video_id = $1 order by idx', [videoId]);
+      const cues = rows.map((c) => ({ startSec: c.start_sec, endSec: c.end_sec, text: c.text }));
+      const raw = await ai.shortSuggestions({ durationSec, cues });
+      v = await finish('ready', { ...cleanSuggestions(raw, { durationSec }), model: ai.model });
+    } catch (e) {
+      console.warn('short suggestions', videoId, e.message);
+      v = await finish('unavailable', { coverSec: Math.round(durationSec * 5) / 10, concerns: [], error: true });
+    }
+    return v;
+  }
+
+  // Deletes rejected Shorts and never-posted uploads older than KEEP_DAYS,
+  // and their videos. Runs at most every ten minutes per server instance,
+  // from requests that need the space (there are no background jobs).
+  let lastCleanUp = 0;
+  async function cleanUp() {
+    if (Date.now() - lastCleanUp < cleanUpEveryMs) return;
+    lastCleanUp = Date.now();
+    const { rows: rejected } = await db.query(
+      `select id from shorts where author_id is not null and status = 'rejected' and updated_at < now() - interval '${KEEP_DAYS} days'`
+    );
+    for (const r of rejected) await removeShort(r.id);
+    const { rows: unposted } = await db.query(
+      `delete from videos v where owner_id is not null and created_at < now() - interval '${KEEP_DAYS} days'
+       and not exists (select 1 from shorts s where s.video_id = v.id) returning asset_id, source_asset_id`
+    );
+    await deleteAssets(unposted);
+  }
+
+  // The video service's files for deleted video rows (and any uncut original).
+  async function deleteAssets(rows) {
+    const ids = rows.flatMap((r) => [r.asset_id, r.source_asset_id]).filter(Boolean);
+    await Promise.all(ids.map((id) => video.deleteAsset(id).catch((e) => console.warn('delete asset', id, e.message))));
+  }
+
+  // A Short and everything hanging off it: likes, views, comments, its video.
+  async function removeShort(id) {
+    const { rows } = await db.query('delete from shorts where id = $1 returning video_id', [id]);
+    for (const table of ['likes', 'views', 'comments']) await db.query(`delete from ${table} where item_type = 'short' and item_id = $1`, [id]);
+    if (rows[0]?.video_id) {
+      const { rows: vids } = await db.query('delete from videos where id = $1 returning asset_id, source_asset_id', [rows[0].video_id]);
+      await deleteAssets(vids);
+    }
+  }
+
+  // A Short someone posted, if it's theirs.
+  async function ownShort(userId, id) {
+    const { rows } = await db.query(`${SHORT_SELECT} where s.id = $1 and s.author_id = $2`, [id, userId]);
+    if (!rows[0]) throw httpError(404, 'Short not found');
+    return rows[0];
+  }
+
   // Visible to listeners: published, and the release time (if scheduled) has come.
   const live = (alias) => `${alias}.status = 'published' and ${alias}.published_at <= now()`;
 
@@ -346,7 +473,7 @@ function createStore({ db, video, ai, transcriber, tint = tintFromUrl }) {
         [like]
       );
       const shorts = await db.query(
-        `${SHORT_SELECT} where ${live('s')} and (s.title ilike $1 or exists (select 1 from unnest(s.tags) t where t ilike $1))
+        `${SHORT_SELECT} where ${live('s')} and (s.title ilike $1 or s.description ilike $1 or exists (select 1 from unnest(s.tags) t where t ilike $1))
          order by s.published_at desc limit 20`,
         [like]
       );
@@ -381,13 +508,18 @@ function createStore({ db, video, ai, transcriber, tint = tintFromUrl }) {
     },
 
     async hostShorts(baseUrl) {
+      await cleanUp().catch((e) => console.warn('clean up', e.message));
       let { rows } = await db.query(`${SHORT_SELECT} order by s.created_at desc`);
       const pending = rows.filter((r) => r.video_id && !['ready', 'errored'].includes(r.video_status));
-      if (pending.length) {
+      // Posted Shorts waiting for review also get the AI's check, if the
+      // uploader didn't stay on the details screen long enough for it.
+      const unchecked = rows.filter((r) => r.author_id && r.status === 'in_review' && r.video_id && !['ready', 'unavailable'].includes(r.suggest_status));
+      if (pending.length || unchecked.length) {
         await syncVideos(pending.map((r) => r.video_id));
+        await Promise.all(unchecked.map((r) => advanceUpload(r.video_id).catch((e) => console.warn('advance', r.video_id, e.message))));
         ({ rows } = await db.query(`${SHORT_SELECT} order by s.created_at desc`));
       }
-      return rows.map((r) => withHostFields(toShort(r, baseUrl), r));
+      return rows.map((r) => toManagedShort(r, baseUrl));
     },
 
     async reach(episodeId) {
@@ -506,7 +638,133 @@ function createStore({ db, video, ai, transcriber, tint = tintFromUrl }) {
     },
 
     async updateShort(id, fields) {
-      return update('shorts', id, fields, { title: 'title', focusX: 'focus_x', tags: 'tags' });
+      return update('shorts', id, fields, {
+        title: 'title',
+        description: 'description',
+        focusX: 'focus_x',
+        tags: 'tags',
+        coverSec: 'cover_sec',
+        reviewNote: 'review_note',
+      });
+    },
+
+    // ---- Posting Shorts from the app (anyone) ----
+
+    async profile(userId) {
+      const { rows } = await db.query('select name, guidelines_at from profiles where user_id = $1', [userId]);
+      return { name: rows[0]?.name ?? null, acceptedGuidelines: !!rows[0]?.guidelines_at, maxShortSec: MAX_SHORT_SEC };
+    },
+
+    // Agreeing to the guidelines is remembered; it can't be taken back here.
+    async saveProfile(userId, { name, acceptGuidelines }) {
+      await db.query(
+        `insert into profiles (user_id, name, guidelines_at) values ($1, $2, case when $3 then now() end)
+         on conflict (user_id) do update set name = excluded.name,
+           guidelines_at = coalesce(profiles.guidelines_at, excluded.guidelines_at), updated_at = now()`,
+        [userId, name, !!acceptGuidelines]
+      );
+      return this.profile(userId);
+    },
+
+    // A one-time upload URL for someone's Short. A range keeps only that part.
+    async createUserUpload(userId, { startSec, endSec }) {
+      const me = await this.profile(userId);
+      if (!me.name || !me.acceptedGuidelines) throw httpError(403, 'Add your name and agree to the guidelines first');
+      await cleanUp().catch((e) => console.warn('clean up', e.message));
+      const { uploadId, uploadUrl } = await video.createUpload({ audio: false, captions: startSec == null }).catch((e) => {
+        // The video service's storage is full (e.g. a plan's video limit).
+        if (/limit/i.test(e.message)) throw httpError(503, 'Posting is paused because video storage is full. Please try again later.');
+        throw e;
+      });
+      const id = newId('vid');
+      await db.query(
+        `insert into videos (id, provider, upload_id, status, owner_id, trim_start, trim_end) values ($1, $2, $3, 'uploading', $4, $5, $6)`,
+        [id, video.name, uploadId, userId, startSec ?? null, endSec ?? null]
+      );
+      return { videoId: id, uploadUrl };
+    },
+
+    // Where an upload has got to, with the AI's suggestions once there are
+    // some and a few frames to pick the cover from.
+    async uploadState(userId, videoId) {
+      const { rows } = await db.query('select owner_id from videos where id = $1', [videoId]);
+      if (!rows[0] || rows[0].owner_id !== userId) throw httpError(404, 'Upload not found');
+      const v = await advanceUpload(videoId);
+      const s = v.suggestions || {};
+      const ready = v.status === 'ready' && v.playback_id;
+      const d = v.duration_sec || 0;
+      return {
+        status: v.status,
+        error: v.error,
+        durationSec: v.duration_sec,
+        suggestions: {
+          status: v.status === 'errored' ? 'unavailable' : v.suggest_status,
+          title: s.title || null,
+          description: s.description || null,
+          tags: s.tags || [],
+          coverSec: s.coverSec ?? null,
+        },
+        // Six evenly spaced frames, plus the suggested one.
+        frames: ready
+          ? [...new Set([...Array.from({ length: 6 }, (_, i) => Math.round(((i + 0.5) * d) / 6)), ...(s.coverSec != null ? [s.coverSec] : [])])]
+              .sort((a, b) => a - b)
+              .map((sec) => ({ sec, url: video.thumbnailUrl(v.playback_id, sec, 240) }))
+          : [],
+      };
+    },
+
+    // An upload that was never posted (the person gave up on it).
+    async deleteUserUpload(userId, videoId) {
+      const { rows } = await db.query(
+        `delete from videos v where id = $1 and owner_id = $2 and not exists (select 1 from shorts s where s.video_id = v.id) returning asset_id, source_asset_id`,
+        [videoId, userId]
+      );
+      if (!rows[0]) throw httpError(404, 'Upload not found');
+      await deleteAssets(rows);
+    },
+
+    async createUserShort(userId, { videoId, title, description = '', tags = [], coverSec = null }) {
+      const { rows } = await db.query('select * from videos where id = $1', [videoId]);
+      const v = rows[0];
+      if (!v || v.owner_id !== userId) throw httpError(404, 'Upload not found');
+      // Sent twice (e.g. the first reply was lost): it's already posted.
+      const { rows: existing } = await db.query('select id, author_id from shorts where video_id = $1', [videoId]);
+      if (existing[0]) {
+        if (existing[0].author_id === userId) return existing[0].id;
+        throw httpError(409, 'This video is already posted');
+      }
+      if (v.status === 'ready' && v.duration_sec > MAX_SHORT_SEC + 0.5) throw httpError(400, `A Short can be at most ${MAX_SHORT_SEC} seconds`);
+      const id = newId('sh');
+      await db.query(
+        `insert into shorts (id, title, description, status, source, video_id, tags, cover_sec, author_id, created_by)
+         values ($1, $2, $3, 'in_review', 'upload', $4, $5, $6, $7, $7)`,
+        [id, title, description, videoId, tags, coverSec, userId]
+      );
+      return id;
+    },
+
+    async myShorts(userId, baseUrl) {
+      let { rows } = await db.query(`${SHORT_SELECT} where s.author_id = $1 order by s.created_at desc`, [userId]);
+      const pending = rows.filter((r) => r.video_id && !['ready', 'errored'].includes(r.video_status));
+      if (pending.length) {
+        await syncVideos(pending.map((r) => r.video_id));
+        ({ rows } = await db.query(`${SHORT_SELECT} where s.author_id = $1 order by s.created_at desc`, [userId]));
+      }
+      // The AI's check is for hosts.
+      return rows.map((r) => ({ ...toManagedShort(r, baseUrl), aiCheck: undefined }));
+    },
+
+    // Details can change while a Short waits for review, not once it's live.
+    async updateMyShort(userId, id, fields) {
+      const row = await ownShort(userId, id);
+      if (row.status !== 'in_review') throw httpError(409, 'Only Shorts still in review can be edited');
+      return update('shorts', id, fields, { title: 'title', description: 'description', tags: 'tags', coverSec: 'cover_sec' });
+    },
+
+    // Gone for everyone, with its likes, views and comments, and the video itself.
+    async deleteMyShort(userId, id) {
+      await ownShort(userId, id);
+      await removeShort(id);
     },
   };
 
@@ -527,6 +785,7 @@ function createStore({ db, video, ai, transcriber, tint = tintFromUrl }) {
     }
     if (fields.status !== undefined) {
       set.status = fields.status;
+      if (table === 'shorts' && fields.status !== 'rejected' && fields.reviewNote === undefined) set.review_note = null;
       if (fields.status === 'published') {
         if (row.video_id) await syncVideos([row.video_id]);
         const { rows: vs } = row.video_id ? await db.query('select * from videos where id = $1', [row.video_id]) : { rows: [] };
@@ -563,4 +822,4 @@ function httpError(status, message) {
   return Object.assign(new Error(message), { status, expose: true });
 }
 
-module.exports = { createStore, httpError, MAX_SHORT_SEC };
+module.exports = { createStore, httpError, MAX_SHORT_SEC, KEEP_DAYS };
