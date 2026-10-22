@@ -76,8 +76,9 @@ export default function CreateWeb() {
           kind="episode"
           icon="film"
           title="Episode"
-          detail="A longer video, kept whole. Listeners can play it as audio too."
+          detail="A longer video, kept whole: record your camera or your screen (up to 30 minutes), or choose a video. Listeners can play it as audio too."
           onFile={(f) => choose('episode', f)}
+          onRecord={() => router.push('/post/record?format=episode')}
         />
       </View>
       {fileError && <Text style={styles.error}>{fileError}</Text>}

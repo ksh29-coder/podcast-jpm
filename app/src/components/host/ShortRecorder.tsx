@@ -19,7 +19,11 @@ const SCROLL_SPEEDS = [20, 35, 55]; // teleprompter, pixels per second
 //
 // Used by Host mode as a screen of its own, and by the ＋ tab, which passes
 // what to do with a recording and adds a button to choose a video instead.
-export function ShortRecorder({ onRecorded, onPickFromLibrary }: { onRecorded?: (r: Recording) => void; onPickFromLibrary?: () => void } = {}) {
+// (`format` is for the website's recorder; the phone camera records Shorts.)
+export function ShortRecorder({
+  onRecorded,
+  onPickFromLibrary,
+}: { onRecorded?: (r: Recording) => void; onPickFromLibrary?: () => void; format?: 'short' | 'episode' } = {}) {
   const insets = useSafeAreaInsets();
   // Opened straight from Host mode (next=upload): continue to the details
   // screen afterwards. Opened from that screen: just go back to it.

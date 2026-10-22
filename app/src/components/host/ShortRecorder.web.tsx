@@ -10,18 +10,60 @@ import { useHost } from './HostGate';
 import { ui } from './ui';
 import { useVideoState } from './useVideoState';
 
-// Web: record a vertical Short in the browser, either from the camera alone or
-// as a screen recording with a movable camera bubble (like Loom). The picture
-// is drawn onto a 9:16 canvas, recorded with the microphone (plus the shared
-// tab's sound, if any), then uploaded like any other Short.
+// Web: record in the browser, either from the camera alone or as a screen
+// recording with a movable camera bubble (like Loom). The picture is drawn
+// onto a canvas, recorded with the microphone (plus the shared tab's sound,
+// if any), then uploaded like any other video. A Short is vertical (9:16) and
+// up to 90 seconds; an episode is landscape (16:9) and up to 30 minutes.
 
 type Mode = 'camera' | 'screen';
 type Stage = 'choose' | 'ready' | 'countdown' | 'recording' | 'review' | 'details';
+export type RecordFormat = 'short' | 'episode';
 
-const W = 720;
-const H = 1280;
-const BUBBLE_SIZES = { S: 0.2, M: 0.27, L: 0.36 }; // radius as a fraction of width
+const FORMATS = {
+  short: { w: 720, h: 1280, maxSec: MAX_SHORT_SEC, bitrate: 5_000_000 },
+  // Lower bitrate: a long recording is held in the browser's memory until it uploads.
+  episode: { w: 1280, h: 720, maxSec: 30 * 60, bitrate: 2_500_000 },
+} as const;
+// What to ask the browser for when sharing the screen. Beyond `video` and
+// `audio` these are hints newer than TypeScript's types, honoured by Chrome
+// and Edge only: offer the "Also share system audio" switch for a screen or
+// window (on a Mac that needs Chrome or Edge 141+ and macOS 14.2+, and it's
+// off until switched on), don't offer this tab, and let people switch tabs.
+type ScreenShareOptions = DisplayMediaStreamOptions & {
+  systemAudio?: 'include' | 'exclude';
+  windowAudio?: 'exclude' | 'window' | 'system';
+  selfBrowserSurface?: 'include' | 'exclude';
+  surfaceSwitching?: 'include' | 'exclude';
+};
+const SCREEN_SHARE: ScreenShareOptions = {
+  video: { frameRate: 30 },
+  // Music and video sound as it is: no voice processing on the shared sound.
+  audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+  systemAudio: 'include',
+  windowAudio: 'system',
+  selfBrowserSurface: 'exclude',
+  surfaceSwitching: 'include',
+};
+// Only Chromium browsers (Chrome, Edge) can include sound in a screen share.
+const canShareSound = typeof navigator !== 'undefined' && 'userAgentData' in navigator;
+
+// Whether the shared screen's sound is coming through: no sound shared, shared
+// but nothing playing yet, or heard.
+type ScreenSound = 'none' | 'silent' | 'heard';
+
+// What to tell someone whose screen recording won't have the screen's sound.
+function soundHint(sound: ScreenSound | null, surface?: string) {
+  if (!canShareSound) return 'Only your microphone will be recorded. Safari and Firefox can’t record sound from your computer; use Chrome or Edge to include it.';
+  if (sound === 'silent') return 'Sound from your screen is connected, but nothing is playing yet. Play something to check it’s coming through.';
+  if (surface === 'browser') return 'Only your microphone will be recorded. To include this tab’s sound, click Share again, pick the tab, and leave “Also share tab audio” on.';
+  return 'Only your microphone will be recorded. To include sound from your computer, click Share again and switch on “Also share system audio” at the bottom of the sharing window (it starts off; on a Mac it needs Chrome or Edge 141 or newer and macOS 14.2 or newer). Or share a Chrome tab with “Also share tab audio” on. If the switch is on and there’s still no sound, allow your browser in System Settings › Privacy & Security › Screen & System Audio Recording, then quit and reopen it.';
+}
+
+const BUBBLE_SIZES = { S: 0.2, M: 0.27, L: 0.36 }; // radius as a fraction of the picture's shorter side
 type BubbleSize = keyof typeof BUBBLE_SIZES;
+// The camera bubble's radius in pixels on a W×H picture.
+const bubbleRadius = (W: number, H: number, size: BubbleSize) => Math.min(W, H) * BUBBLE_SIZES[size];
 
 // Browsers slow timers in background tabs, and you'll be looking at the shared
 // window, not this tab. A worker's timer keeps ticking, so drawing (and so the
@@ -67,7 +109,7 @@ function drawCover(ctx: CanvasRenderingContext2D, video: HTMLVideoElement, x: nu
 }
 
 // Whole picture, with bars where the shapes differ.
-function drawContain(ctx: CanvasRenderingContext2D, video: HTMLVideoElement) {
+function drawContain(ctx: CanvasRenderingContext2D, video: HTMLVideoElement, W: number, H: number) {
   const vw = video.videoWidth;
   const vh = video.videoHeight;
   if (!vw || !vh) return;
@@ -79,8 +121,13 @@ function drawContain(ctx: CanvasRenderingContext2D, video: HTMLVideoElement) {
 
 // `onRecorded`: what to do with a finished recording (the New page hands it
 // to the posting screens). Without it, as in the Host Studio, the recording
-// is uploaded and published from here.
-export function ShortRecorder({ onRecorded }: { onRecorded?: (r: { uri: string; durationSec: number; blob: Blob }) => void } = {}) {
+// is uploaded and published from here (Shorts only).
+export function ShortRecorder({
+  onRecorded,
+  format = 'short',
+}: { onRecorded?: (r: { uri: string; durationSec: number; blob: Blob }) => void; format?: RecordFormat } = {}) {
+  const { w: W, h: H, maxSec: MAX_SEC, bitrate } = FORMATS[format];
+  const bubblePx = (size: BubbleSize) => bubbleRadius(W, H, size);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const cameraVideo = useRef<HTMLVideoElement | null>(null);
   const screenVideo = useRef<HTMLVideoElement | null>(null);
@@ -97,11 +144,21 @@ export function ShortRecorder({ onRecorded }: { onRecorded?: (r: { uri: string; 
   const [elapsed, setElapsed] = useState(0);
   const [result, setResult] = useState<{ blob: Blob; url: string; durationSec: number } | null>(null);
 
+  // Is the shared screen's sound coming through, and what was shared ('browser' tab, 'window' or 'monitor').
+  const [screenSound, setScreenSound] = useState<ScreenSound | null>(null);
+  const [surface, setSurface] = useState<string | undefined>();
+  const screenMeter = useRef<AnalyserNode | null>(null);
+
   // Screen layout: whole screen with bars, or filled and cropped (with pan).
   const [fit, setFit] = useState<'contain' | 'cover'>('contain');
   const [panX, setPanX] = useState(0.5);
-  // Bubble centre as a fraction of the canvas. Starts top-right.
-  const [bubble, setBubble] = useState({ x: 0.74, y: 0.17 });
+  // Bubble centre as a fraction of the canvas. Starts in the top-right corner,
+  // just inside the edges whatever the picture's shape.
+  const [bubble, setBubble] = useState(() => {
+    const r = bubbleRadius(W, H, 'M');
+    const inset = 0.03 * Math.min(W, H);
+    return { x: (W - r - inset) / W, y: (r + inset) / H };
+  });
   const [bubbleSize, setBubbleSize] = useState<BubbleSize>('M');
   const [showBubble, setShowBubble] = useState(true);
   const dragging = useRef(false);
@@ -120,6 +177,7 @@ export function ShortRecorder({ onRecorded }: { onRecorded?: (r: { uri: string; 
     streams.current = [];
     audio.current?.ctx.close();
     audio.current = null;
+    screenMeter.current = null;
   }
 
   // Draw loop: runs from setup until the page closes or sources stop.
@@ -139,11 +197,11 @@ export function ShortRecorder({ onRecorded }: { onRecorded?: (r: { uri: string; 
         return;
       }
       if (scr) {
-        if (l.fit === 'contain') drawContain(ctx, scr);
+        if (l.fit === 'contain') drawContain(ctx, scr, W, H);
         else drawCover(ctx, scr, 0, 0, W, H, l.panX);
       }
       if (cam && l.showBubble) {
-        const r = W * BUBBLE_SIZES[l.bubbleSize];
+        const r = bubbleRadius(W, H, l.bubbleSize);
         const cx = l.bubble.x * W;
         const cy = l.bubble.y * H;
         ctx.save();
@@ -159,7 +217,7 @@ export function ShortRecorder({ onRecorded }: { onRecorded?: (r: { uri: string; 
         ctx.stroke();
       }
     });
-  }, [drawing]);
+  }, [drawing, W, H]);
 
   // Recording clock; stops at the limit.
   useEffect(() => {
@@ -167,9 +225,22 @@ export function ShortRecorder({ onRecorded }: { onRecorded?: (r: { uri: string; 
     return startTicker(10, () => {
       const sec = (Date.now() - startedAt.current) / 1000;
       setElapsed(sec);
-      if (sec >= MAX_SHORT_SEC) stopRecording();
+      if (sec >= MAX_SEC) stopRecording();
     });
-  }, [stage]);
+  }, [stage, MAX_SEC]);
+
+  // While getting ready, listen for the screen's sound actually arriving.
+  useEffect(() => {
+    const meter = screenMeter.current;
+    if (stage !== 'ready' || screenSound !== 'silent' || !meter) return;
+    const samples = new Float32Array(meter.fftSize);
+    const t = setInterval(() => {
+      meter.getFloatTimeDomainData(samples);
+      const level = Math.sqrt(samples.reduce((sum, v) => sum + v * v, 0) / samples.length);
+      if (level > 0.005) setScreenSound('heard');
+    }, 200);
+    return () => clearInterval(t);
+  }, [stage, screenSound]);
 
   // 3-2-1 before recording, so you can switch to the window you're sharing.
   useEffect(() => {
@@ -179,6 +250,8 @@ export function ShortRecorder({ onRecorded }: { onRecorded?: (r: { uri: string; 
       else beginRecording();
     }, 1000);
     return () => clearTimeout(t);
+    // beginRecording reads refs and the current settings; the countdown is what matters here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stage, countdown]);
 
   const setUp = async (chosen: Mode) => {
@@ -212,16 +285,33 @@ export function ShortRecorder({ onRecorded }: { onRecorded?: (r: { uri: string; 
       audio.current = { ctx, dest };
 
       if (chosen === 'screen') {
-        const screen = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: true });
+        const screen = await navigator.mediaDevices.getDisplayMedia(SCREEN_SHARE);
         streams.current.push(screen);
         screenVideo.current = await playIn(new MediaStream(screen.getVideoTracks()));
-        if (screen.getAudioTracks().length) ctx.createMediaStreamSource(new MediaStream(screen.getAudioTracks())).connect(dest);
+        setSurface(screen.getVideoTracks()[0].getSettings().displaySurface);
+        // The screen's sound, if the browser shared any. A meter on it tells
+        // whether anything is actually coming through before recording.
+        const sound = screen.getAudioTracks().filter((t) => t.readyState === 'live');
+        if (sound.length) {
+          const src = ctx.createMediaStreamSource(new MediaStream(sound));
+          src.connect(dest);
+          const meter = ctx.createAnalyser();
+          meter.fftSize = 1024;
+          src.connect(meter);
+          screenMeter.current = meter;
+          // On a Mac the track can end at once if the browser isn't allowed to record system audio.
+          sound[0].addEventListener('ended', () => setScreenSound('none'));
+          setScreenSound('silent');
+        } else {
+          setScreenSound('none');
+        }
         // "Stop sharing" in the browser bar ends the recording too.
         screen.getVideoTracks()[0].addEventListener('ended', () => {
           if (recorder.current?.state === 'recording') stopRecording();
         });
       } else {
         screenVideo.current = null;
+        setScreenSound(null);
       }
       setDrawing(true);
       setStage('ready');
@@ -245,12 +335,12 @@ export function ShortRecorder({ onRecorded }: { onRecorded?: (r: { uri: string; 
     if (!canvas || !audio.current) return;
     const mimeType = pickMimeType();
     const stream = new MediaStream([...canvas.captureStream(30).getVideoTracks(), ...audio.current.dest.stream.getAudioTracks()]);
-    const rec = new MediaRecorder(stream, { mimeType: mimeType || undefined, videoBitsPerSecond: 5_000_000 });
+    const rec = new MediaRecorder(stream, { mimeType: mimeType || undefined, videoBitsPerSecond: bitrate });
     chunks.current = [];
     rec.ondataavailable = (e) => e.data.size && chunks.current.push(e.data);
     rec.onstop = () => {
       const blob = new Blob(chunks.current, { type: rec.mimeType || mimeType || 'video/webm' });
-      const durationSec = Math.min(MAX_SHORT_SEC, (Date.now() - startedAt.current) / 1000);
+      const durationSec = Math.min(MAX_SEC, (Date.now() - startedAt.current) / 1000);
       setResult({ blob, url: URL.createObjectURL(blob), durationSec });
       setStage('review');
     };
@@ -285,10 +375,7 @@ export function ShortRecorder({ onRecorded }: { onRecorded?: (r: { uri: string; 
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (mode !== 'screen' || !showBubble) return;
     const p = pointerTo(e);
-    const r = BUBBLE_SIZES[bubbleSize];
-    const dx = p.x - bubble.x;
-    const dy = ((p.y - bubble.y) * H) / W;
-    if (Math.hypot(dx, dy) <= r) {
+    if (Math.hypot((p.x - bubble.x) * W, (p.y - bubble.y) * H) <= bubblePx(bubbleSize)) {
       dragging.current = true;
       e.currentTarget.setPointerCapture(e.pointerId);
     }
@@ -296,9 +383,9 @@ export function ShortRecorder({ onRecorded }: { onRecorded?: (r: { uri: string; 
   const onPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (!dragging.current) return;
     const p = pointerTo(e);
-    const r = BUBBLE_SIZES[bubbleSize];
-    const ry = (r * W) / H;
-    setBubble({ x: Math.min(1 - r, Math.max(r, p.x)), y: Math.min(1 - ry, Math.max(ry, p.y)) });
+    const rx = bubblePx(bubbleSize) / W;
+    const ry = bubblePx(bubbleSize) / H;
+    setBubble({ x: Math.min(1 - rx, Math.max(rx, p.x)), y: Math.min(1 - ry, Math.max(ry, p.y)) });
   };
   const onPointerUp = () => {
     dragging.current = false;
@@ -314,11 +401,13 @@ export function ShortRecorder({ onRecorded }: { onRecorded?: (r: { uri: string; 
     <ScrollView contentContainerStyle={ui.page}>
       {stage === 'choose' && (
         <>
-          <Text style={ui.hint}>Shorts are vertical and up to {MAX_SHORT_SEC} seconds.</Text>
+          <Text style={ui.hint}>
+            {format === 'episode' ? `Episodes are landscape (16:9) and up to ${MAX_SEC / 60} minutes.` : `Shorts are vertical and up to ${MAX_SEC} seconds.`}
+          </Text>
           <View style={ui.row}>
             <ModeCard
               title="Screen + camera"
-              detail="Share a screen, window or tab, with you in a bubble you can move. To show your iPhone, open iPhone Mirroring on your Mac and share that window."
+              detail="Share a screen, window or tab, with you in a bubble you can move. To include its sound, switch on “Also share system audio” (or “Also share tab audio”) when you choose what to share; Chrome or Edge only. To show your iPhone, open iPhone Mirroring on your Mac and share that window."
               onPress={() => setUp('screen')}
             />
             <ModeCard title="Camera only" detail="A normal video of you, from your webcam." onPress={() => setUp('camera')} />
@@ -332,11 +421,11 @@ export function ShortRecorder({ onRecorded }: { onRecorded?: (r: { uri: string; 
           <Text style={[ui.label, { marginTop: 0 }]}>{mode === 'screen' ? 'Screen + camera' : 'Camera only'}</Text>
           {stage === 'recording' && (
             <Text style={{ color: '#ff3b5c', fontWeight: '800', fontVariant: ['tabular-nums'] }}>
-              ● {formatTime(elapsed)} / {formatTime(MAX_SHORT_SEC)}
+              ● {formatTime(elapsed)} / {formatTime(MAX_SEC)}
             </Text>
           )}
         </View>
-        <div style={{ position: 'relative', alignSelf: 'center', height: 'min(70vh, 640px)', aspectRatio: '9 / 16', borderRadius: 16, overflow: 'hidden', background: '#000' }}>
+        <div style={{ position: 'relative', alignSelf: 'center', ...previewBox(format), borderRadius: 16, overflow: 'hidden', background: '#000' }}>
           <canvas
             ref={canvasRef}
             width={W}
@@ -384,6 +473,8 @@ export function ShortRecorder({ onRecorded }: { onRecorded?: (r: { uri: string; 
             <Pressable
               style={[ui.button, { backgroundColor: '#ff3b5c' }]}
               onPress={() => {
+                // Some browsers start sound processing suspended until a click.
+                void audio.current?.ctx.resume();
                 setCountdown(3);
                 setStage('countdown');
               }}
@@ -417,11 +508,22 @@ export function ShortRecorder({ onRecorded }: { onRecorded?: (r: { uri: string; 
         {stage === 'ready' && mode === 'screen' && (
           <Text style={ui.hint}>After you press Start there’s a 3-second countdown, so you can switch to the window you’re sharing.</Text>
         )}
+        {stage === 'ready' && mode === 'screen' && screenSound === 'heard' && <Text style={ui.hint}>✓ Sound from your screen is coming through.</Text>}
+        {stage === 'ready' && mode === 'screen' && screenSound !== 'heard' && (
+          <View style={ui.card}>
+            <Text style={ui.hint}>{soundHint(screenSound, surface)}</Text>
+            {canShareSound && screenSound === 'none' && (
+              <Pressable style={[ui.button, ui.secondary, { alignSelf: 'flex-start' }]} onPress={() => setUp('screen')}>
+                <Text style={ui.secondaryText}>Share again</Text>
+              </Pressable>
+            )}
+          </View>
+        )}
       </View>
 
       {stage === 'review' && result && (
         <>
-          <video src={result.url} controls playsInline style={{ alignSelf: 'center', height: 'min(70vh, 640px)', aspectRatio: '9 / 16', borderRadius: 16, background: '#000' }} />
+          <video src={result.url} controls playsInline style={{ alignSelf: 'center', ...previewBox(format), borderRadius: 16, background: '#000' }} />
           <Text style={ui.hint}>Length {formatTime(result.durationSec)}</Text>
           <View style={ui.row}>
             <Pressable
@@ -442,6 +544,11 @@ export function ShortRecorder({ onRecorded }: { onRecorded?: (r: { uri: string; 
       )}
     </ScrollView>
   );
+}
+
+// The preview's size on the page: tall for a Short, wide for an episode.
+function previewBox(format: RecordFormat) {
+  return format === 'episode' ? { width: 'min(100%, 960px)', aspectRatio: '16 / 9' } : { height: 'min(70vh, 640px)', aspectRatio: '9 / 16' };
 }
 
 // A hidden, muted <video> playing a stream, ready to be drawn from.

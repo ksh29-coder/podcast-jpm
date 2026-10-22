@@ -6,7 +6,7 @@ import { Icon, type IconName } from '../../components/Icon';
 import { Scrubber } from '../../components/Scrubber';
 import { ShortVideo, type ShortVideoHandle } from '../../components/ShortVideo';
 import { shareItem } from '../../components/engage/share';
-import { Tags } from '../../components/engage/Tags';
+import { ShortInfo } from '../../components/engage/ShortInfo';
 import { PostMenu } from '../../components/engage/PostMenu';
 import { useLike } from '../../components/engage/useLike';
 import { hovered } from '../../components/web/hover';
@@ -112,27 +112,7 @@ function ShortStage({ short, index, total, box, narrow }: { short: Short; index:
           )}
         </Pressable>
         <View pointerEvents="box-none" style={[styles.overlay, narrow && { paddingRight: 76 }]}>
-          {short.author && <Text style={[type.footnote, styles.light, { fontWeight: '700' }]}>by {short.author.name}</Text>}
-          {short.episodeTitle && <Text style={[type.eyebrow, { color: 'rgba(255,255,255,0.8)' }]}>{short.episodeTitle}</Text>}
-          <Text style={[type.title, styles.light]}>{short.title}</Text>
-          {!!short.description && (
-            <Text style={[type.footnote, { color: 'rgba(255,255,255,0.9)' }]} numberOfLines={3}>
-              {short.description}
-            </Text>
-          )}
-          <Tags tags={short.tags} light />
-          {short.episodeId && (
-            <Pressable
-              style={(s) => [styles.cta, hovered(s) && { opacity: 0.85 }]}
-              onPress={() => router.push(short.startSec != null ? `/episode/${short.episodeId}?t=${short.startSec}` : `/episode/${short.episodeId}`)}
-              accessibilityRole="link"
-            >
-              <Icon name="headphones" size={15} color={colors.accentText} />
-              <Text style={[type.footnote, { color: colors.accentText, fontWeight: '700' }]}>
-                {short.startSec != null ? 'Play full episode from here' : 'Play the full episode'}
-              </Text>
-            </Pressable>
-          )}
+          <ShortInfo short={short} />
           {time.duration > 0 && <Scrubber variant="overlay" position={time.position} duration={time.duration} onSeek={(sec) => video.current?.seekTo(sec)} />}
         </View>
         <Text style={styles.counter}>
@@ -204,9 +184,7 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     experimental_backgroundImage: 'linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.75) 45%)',
   },
-  light: { color: '#fff' },
   counter: { position: 'absolute', top: spacing.md, right: spacing.md, ...type.caption, color: 'rgba(255,255,255,0.85)', fontVariant: ['tabular-nums'] },
-  cta: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: spacing.xs + 2, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm, borderRadius: radius.full, backgroundColor: colors.accent },
   actions: { gap: spacing.lg, paddingBottom: spacing.lg },
   actionsNarrow: { position: 'absolute', right: spacing.md, bottom: 140, gap: spacing.md },
   action: { alignItems: 'center', gap: spacing.xs },
