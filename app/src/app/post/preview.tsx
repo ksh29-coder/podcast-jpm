@@ -1,10 +1,10 @@
 import { useEventListener } from 'expo';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { Redirect, router } from 'expo-router';
+import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { usePost } from '../../components/post/PostContext';
+import { NoVideo, usePost } from '../../components/post/PostContext';
 import { TrimBar } from '../../components/post/TrimBar';
 import { MAX_SHORT_SEC } from '../../lib/host';
 import { colors, radius, spacing, type } from '../../theme';
@@ -14,6 +14,11 @@ import { colors, radius, spacing, type } from '../../theme';
 export default function PostPreview() {
   const insets = useSafeAreaInsets();
   const { picked, startUpload } = usePost();
+  // A wide window (the website): the video centred above the controls,
+  // instead of filling the screen behind them.
+  const { width, height } = useWindowDimensions();
+  const wide = width >= 700;
+  const videoHeight = height - 230;
   const [duration, setDuration] = useState(picked?.durationSec ?? 0);
   const [range, setRange] = useState({ start: 0, end: Math.min(picked?.durationSec ?? MAX_SHORT_SEC, MAX_SHORT_SEC) });
 
@@ -33,7 +38,7 @@ export default function PostPreview() {
     if (currentTime >= range.end || currentTime < range.start - 0.5) player.seekBy(range.start - currentTime);
   });
 
-  if (!picked) return <Redirect href="/post" />;
+  if (!picked) return <NoVideo />;
 
   const whole = range.start <= 0.2 && range.end >= duration - 0.2;
   const next = () => {
@@ -43,9 +48,14 @@ export default function PostPreview() {
   };
 
   return (
-    <View style={styles.screen}>
-      <VideoView player={player} style={StyleSheet.absoluteFill} contentFit="contain" nativeControls={false} />
-      <View style={[styles.bottom, { paddingBottom: insets.bottom + spacing.lg }]}>
+    <View style={[styles.screen, wide && styles.screenWide]}>
+      <VideoView
+        player={player}
+        style={wide ? { width: (videoHeight * 9) / 16, height: videoHeight, borderRadius: radius.lg } : StyleSheet.absoluteFill}
+        contentFit="contain"
+        nativeControls={false}
+      />
+      <View style={[styles.bottom, wide && styles.bottomWide, { paddingBottom: insets.bottom + spacing.lg }]}>
         {duration > 0 && (
           <TrimBar
             durationSec={duration}
@@ -75,7 +85,9 @@ export default function PostPreview() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#000' },
+  screenWide: { alignItems: 'center', paddingTop: spacing.xl, gap: spacing.lg, backgroundColor: colors.bg },
   bottom: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: spacing.xl, paddingTop: spacing.lg, gap: spacing.md, backgroundColor: 'rgba(0,0,0,0.6)' },
+  bottomWide: { position: 'relative', width: '100%', maxWidth: 720, backgroundColor: 'transparent' },
   hint: { ...type.footnote, color: 'rgba(255,255,255,0.85)', textAlign: 'center' },
   row: { flexDirection: 'row', gap: spacing.md },
   button: { flex: 1, alignItems: 'center', paddingVertical: spacing.md + 2, borderRadius: radius.full, backgroundColor: colors.accent },

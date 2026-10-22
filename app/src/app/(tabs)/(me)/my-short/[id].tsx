@@ -2,13 +2,15 @@ import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { TagsField } from '../../../../components/post/TagsField';
-import { api, type MyShort } from '../../../../lib/api';
+import { api, type MyEpisode, type MyShort } from '../../../../lib/api';
 import { colors, radius, spacing, type } from '../../../../theme';
 
-// Change a Short's details while it waits for review.
+// Change a Short's or episode's details while it waits for review.
+// Episode ids start with "ep_".
 export default function EditMyShort() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const [short, setShort] = useState<MyShort | null>(null);
+  const isEpisode = id.startsWith('ep_');
+  const [short, setShort] = useState<MyShort | MyEpisode | null>(null);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [tags, setTags] = useState<string[]>([]);
@@ -16,8 +18,8 @@ export default function EditMyShort() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    api.myShorts().then(
-      (all) => {
+    (isEpisode ? api.myEpisodes() : api.myShorts()).then(
+      (all: (MyShort | MyEpisode)[]) => {
         const s = all.find((x) => x.id === id);
         if (!s) return setError('Short not found');
         setShort(s);
@@ -27,7 +29,7 @@ export default function EditMyShort() {
       },
       (e) => setError(e instanceof Error ? e.message : String(e))
     );
-  }, [id]);
+  }, [id, isEpisode]);
 
   if (!short) return error ? <Text style={[styles.error, { padding: spacing.xl }]}>{error}</Text> : <ActivityIndicator style={{ flex: 1 }} color={colors.text} />;
 
@@ -35,7 +37,8 @@ export default function EditMyShort() {
     setBusy(true);
     setError(null);
     try {
-      await api.updateMyShort(short.id, { title: title.trim(), description: description.trim(), tags });
+      const details = { title: title.trim(), description: description.trim(), tags };
+      await (isEpisode ? api.updateMyEpisode(short.id, details) : api.updateMyShort(short.id, details));
       router.back();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -60,7 +63,7 @@ export default function EditMyShort() {
 }
 
 const styles = StyleSheet.create({
-  page: { padding: spacing.xl, gap: spacing.md },
+  page: { padding: spacing.xl, gap: spacing.md, width: '100%', maxWidth: 760, alignSelf: 'center' },
   input: { color: colors.text, backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: spacing.md, fontSize: 16 },
   error: { color: colors.danger, fontSize: 14 },
   button: { marginTop: spacing.md, alignItems: 'center', paddingVertical: spacing.md + 2, borderRadius: radius.full, backgroundColor: colors.accent },

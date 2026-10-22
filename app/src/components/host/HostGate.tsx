@@ -74,7 +74,7 @@ function PasscodeForm({ error, onSubmit, onCancel }: { error?: string; onSubmit:
   return (
     <View style={styles.wrap}>
       <Text style={styles.title}>Host mode</Text>
-      <Text style={styles.detail}>Enter the host passcode to upload and publish episodes and Shorts.</Text>
+      <Text style={styles.detail}>Enter the host passcode to review what people post, and to manage episodes and Shorts.</Text>
       <TextInput
         style={[ui.input, styles.input]}
         value={value}

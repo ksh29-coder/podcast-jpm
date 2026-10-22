@@ -1,26 +1,33 @@
 import { useCallback, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Image, Pressable, RefreshControl, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Image, Platform, Pressable, RefreshControl, StyleSheet, Text, TextInput, View } from 'react-native';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { ErrorState } from '../../../components/ErrorState';
 import { Icon } from '../../../components/Icon';
-import { api, type MyShort, type Profile } from '../../../lib/api';
+import { api, type MyEpisode, type MyShort, type Profile } from '../../../lib/api';
 import { saveDisplayName } from '../../../lib/device';
 import { colors, radius, spacing, type } from '../../../theme';
 
-// Your name, Downloads, and every Short you've posted with where it is in review.
+// Something this person posted: a Short (phone or website) or an episode (website).
+type MyItem = (MyShort & { kind: 'short' }) | (MyEpisode & { kind: 'episode' });
+
+const web = Platform.OS === 'web';
+
+// Your name, Downloads, and everything you've posted with where it is in review.
 export default function MeScreen() {
   const { posted } = useLocalSearchParams<{ posted?: string }>();
   const [profile, setProfile] = useState<Profile | null>(null);
-  const [shorts, setShorts] = useState<MyShort[] | null>(null);
+  const [shorts, setShorts] = useState<MyItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [showPosted, setShowPosted] = useState(true);
 
   const load = useCallback(async () => {
     try {
-      const [p, s] = await Promise.all([api.me(), api.myShorts()]);
+      const [p, s, e] = await Promise.all([api.me(), api.myShorts(), api.myEpisodes()]);
       setProfile(p);
-      setShorts(s);
+      setShorts(
+        [...s.map((x) => ({ ...x, kind: 'short' as const })), ...e.map((x) => ({ ...x, kind: 'episode' as const }))].sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      );
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -37,22 +44,27 @@ export default function MeScreen() {
   if (error && !shorts) return <ErrorState message={error} onRetry={load} />;
   if (!profile || !shorts) return <ActivityIndicator style={{ flex: 1, backgroundColor: colors.bg }} color={colors.text} />;
 
-  const remove = (s: MyShort) =>
-    Alert.alert('Delete this Short?', s.status === 'published' ? 'It’s removed for everyone, with its likes and comments.' : 'It won’t be reviewed or posted.', [
+  const remove = (s: MyItem) => {
+    const what = s.kind === 'episode' ? 'episode' : 'Short';
+    const detail = s.status === 'published' ? 'It’s removed for everyone, with its likes and comments.' : 'It won’t be reviewed or posted.';
+    const go = async () => {
+      try {
+        await (s.kind === 'episode' ? api.deleteMyEpisode(s.id) : api.deleteMyShort(s.id));
+        setShorts((all) => all?.filter((x) => x.id !== s.id) ?? null);
+      } catch (e) {
+        Alert.alert('Couldn’t delete it', e instanceof Error ? e.message : String(e));
+      }
+    };
+    // The browser has no alert sheet; confirm() is the plain equivalent.
+    if (web) {
+      if (globalThis.confirm?.(`Delete this ${what}? ${detail}`)) go();
+      return;
+    }
+    Alert.alert(`Delete this ${what}?`, detail, [
       { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await api.deleteMyShort(s.id);
-            setShorts((all) => all?.filter((x) => x.id !== s.id) ?? null);
-          } catch (e) {
-            Alert.alert('Couldn’t delete it', e instanceof Error ? e.message : String(e));
-          }
-        },
-      },
+      { text: 'Delete', style: 'destructive', onPress: go },
     ]);
+  };
 
   return (
     <FlatList
@@ -60,7 +72,7 @@ export default function MeScreen() {
       keyExtractor={(s) => s.id}
       contentInsetAdjustmentBehavior="automatic"
       style={{ backgroundColor: colors.bg }}
-      contentContainerStyle={{ paddingBottom: spacing.huge }}
+      contentContainerStyle={[{ paddingBottom: spacing.huge }, web && styles.webPage]}
       refreshControl={
         <RefreshControl
           refreshing={refreshing}
@@ -74,6 +86,7 @@ export default function MeScreen() {
       }
       ListHeaderComponent={
         <View style={styles.header}>
+          {web && <Text style={styles.webTitle}>Me</Text>}
           {posted && showPosted && (
             <Pressable style={styles.banner} onPress={() => setShowPosted(false)} accessibilityRole="button" accessibilityHint="Dismiss">
               <Icon name="checkCircle" size={20} color={colors.accentText} />
@@ -86,15 +99,15 @@ export default function MeScreen() {
             <Text style={[type.headline, { flex: 1 }]}>Downloads</Text>
             <Icon name="chevronRight" size={16} color={colors.textMuted} />
           </Pressable>
-          <Text style={[type.eyebrow, styles.section]}>My Shorts</Text>
+          <Text style={[type.eyebrow, styles.section]}>My uploads</Text>
         </View>
       }
       ListEmptyComponent={
         <View style={styles.empty}>
-          <Text style={[type.subhead, { textAlign: 'center' }]}>Shorts you post appear here, with where they are in review.</Text>
-          <Pressable style={styles.cta} onPress={() => router.push('/post')} accessibilityRole="button">
+          <Text style={[type.subhead, { textAlign: 'center' }]}>What you post appears here, with where it is in review.</Text>
+          <Pressable style={styles.cta} onPress={() => router.push(web ? '/create' : '/post')} accessibilityRole="button">
             <Icon name="plus" size={16} color={colors.accentText} />
-            <Text style={styles.ctaText}>New Short</Text>
+            <Text style={styles.ctaText}>{web ? 'Post a Short or episode' : 'New Short'}</Text>
           </Pressable>
         </View>
       }
@@ -163,24 +176,29 @@ function NameCard({ profile, onSaved }: { profile: Profile; onSaved: (p: Profile
   );
 }
 
-const STATUS: Record<MyShort['status'], { label: string; color: string }> = {
+const STATUS: Record<MyItem['status'], { label: string; color: string }> = {
   in_review: { label: 'In review', color: colors.highlight },
   published: { label: 'Live', color: '#4ADE80' },
   rejected: { label: 'Not approved', color: colors.danger },
   draft: { label: 'Hidden', color: colors.textMuted },
 };
 
-function MyShortRow({ short, onEdit, onDelete }: { short: MyShort; onEdit: () => void; onDelete: () => void }) {
+function MyShortRow({ short, onEdit, onDelete }: { short: MyItem; onEdit: () => void; onDelete: () => void }) {
   const status = STATUS[short.status];
   const processing = short.video && short.video.status !== 'ready';
   return (
     <View style={styles.item}>
-      {short.artworkUrl && !processing ? <Image source={{ uri: short.artworkUrl }} style={styles.thumb} /> : <View style={styles.thumb} />}
+      {short.artworkUrl && !processing ? (
+        <Image source={{ uri: short.artworkUrl }} style={[styles.thumb, short.kind === 'episode' && styles.thumbEpisode]} />
+      ) : (
+        <View style={[styles.thumb, short.kind === 'episode' && styles.thumbEpisode]} />
+      )}
       <View style={{ flex: 1, gap: spacing.xs }}>
         <Text style={type.headline} numberOfLines={2}>
           {short.title}
         </Text>
         <View style={styles.line}>
+          {short.kind === 'episode' && <Text style={type.footnote}>Episode ·</Text>}
           <View style={[styles.dot, { backgroundColor: status.color }]} />
           <Text style={[type.footnote, { color: status.color, fontWeight: '700' }]}>{status.label}</Text>
           {processing && <Text style={type.footnote}>· {short.video?.status === 'errored' ? 'Processing failed' : 'Processing…'}</Text>}
@@ -212,6 +230,8 @@ function MyShortRow({ short, onEdit, onDelete }: { short: MyShort; onEdit: () =>
 
 const styles = StyleSheet.create({
   header: { paddingHorizontal: spacing.xl, gap: spacing.md, paddingTop: spacing.sm },
+  webPage: { width: '100%', maxWidth: 860, alignSelf: 'center', paddingTop: spacing.xxl },
+  webTitle: { ...type.display, fontSize: 34, marginBottom: spacing.sm },
   banner: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, padding: spacing.md, borderRadius: radius.md, backgroundColor: colors.highlight },
   card: { backgroundColor: colors.card, borderRadius: radius.lg, padding: spacing.lg },
   nameCard: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
@@ -225,6 +245,7 @@ const styles = StyleSheet.create({
   ctaText: { color: colors.accentText, fontWeight: '700', fontSize: 15 },
   item: { flexDirection: 'row', gap: spacing.md, paddingHorizontal: spacing.xl, paddingVertical: spacing.md },
   thumb: { width: 72, height: 96, borderRadius: radius.sm, backgroundColor: colors.cardHigh },
+  thumbEpisode: { width: 96, height: 96 },
   line: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, flexWrap: 'wrap' },
   dot: { width: 8, height: 8, borderRadius: 4 },
   note: { color: colors.text, fontStyle: 'italic' },

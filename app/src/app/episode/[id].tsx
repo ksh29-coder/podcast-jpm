@@ -81,212 +81,229 @@ function NowPlaying({ episode, startAt, startInVideo }: { episode: Episode; star
   const sleep = player.sleep;
   const sleepLabel = !sleep ? null : sleep.kind === 'time' ? formatTime(player.sleepLeftSec ?? 0) : 'End of chapter';
 
-  const artSize = Math.min(width - spacing.xxxl * 2, 340);
+  // Wide screens (the website, iPad): player on the left, details on the right.
+  const wide = width >= 1000;
+  const artSize = wide ? 360 : Math.min(width - spacing.xxxl * 2, 340);
   const glow = withAlpha(episode.tint || colors.tintFallback, 0.85);
 
   return (
     <View collapsable={false} style={{ flex: 1, backgroundColor: colors.bg, experimental_backgroundImage: tintWash(episode.tint) }}>
-      <ScrollView contentInsetAdjustmentBehavior="automatic" contentContainerStyle={styles.page}>
-        {hasAudio && (
-          <Glass style={styles.toggle}>
-            {(['audio', 'video'] as const).map((m) => (
-              <Pressable
-                key={m}
-                style={[styles.toggleItem, mode === m && styles.toggleActive]}
-                onPress={() => switchMode(m)}
-                accessibilityRole="button"
-                accessibilityState={{ selected: mode === m }}
-              >
-                <Icon name={m === 'audio' ? 'headphones' : 'video'} size={15} color={mode === m ? colors.accentText : colors.text} />
-                <Text style={[type.footnote, { color: mode === m ? colors.accentText : colors.text, fontWeight: '700' }]}>{m === 'audio' ? 'Listen' : 'Watch'}</Text>
-              </Pressable>
-            ))}
-          </Glass>
-        )}
-
-        {mode === 'video' ? (
-          <EpisodeVideo key={videoStart.n} uri={episode.videoUrl} startAt={videoStart.sec} onTime={(s) => (videoTime.current = s)} style={styles.video} />
-        ) : (
-          <View style={[styles.artWrap, { width: artSize, height: artSize, boxShadow: `0 24px 60px ${glow}` }]}>
-            <Image source={{ uri: episode.artworkUrl }} style={[styles.art, { width: artSize, height: artSize }]} />
-          </View>
-        )}
-
-        <View style={styles.titleBlock}>
-          <Text style={type.eyebrow}>
-            {formatDate(episode.publishedAt)} · {formatDuration(episode.durationSec)}
-          </Text>
-          <Text style={type.title}>{episode.title}</Text>
-          {currentChapter && mode === 'audio' && (
-            <Text style={[type.subhead, { color: colors.highlight, fontWeight: '700' }]} numberOfLines={1}>
-              {currentChapter.title}
-            </Text>
-          )}
-        </View>
-
-        {mode === 'audio' && (
-          <>
-            <Scrubber position={position} duration={duration} onSeek={(s) => (isCurrent ? player.seekTo(s) : player.playEpisode(episode, s))} />
-            <View style={styles.controls}>
-              <Pressable
-                onPress={() => router.push('/playback')}
-                style={styles.side}
-                accessibilityRole="button"
-                accessibilityLabel={`Playback speed ${player.prefs.rate} times. Change speed, sleep timer and skip lengths`}
-              >
-                <Text style={[type.headline, { fontVariant: ['tabular-nums'] }]}>{player.prefs.rate}×</Text>
-              </Pressable>
-              <Pressable
-                onPress={() => isCurrent && player.seekBy(-player.prefs.skipBack)}
-                hitSlop={8}
-                accessibilityRole="button"
-                accessibilityLabel={`Back ${player.prefs.skipBack} seconds`}
-              >
-                <Icon name={skipIcon('back', player.prefs.skipBack)} size={32} />
-              </Pressable>
-              <Pressable
-                style={({ pressed }) => [styles.playButton, pressed && { transform: [{ scale: 0.96 }] }]}
-                onPress={() => (playing ? player.pause() : player.playEpisode(episode))}
-                accessibilityRole="button"
-                accessibilityLabel={playing ? 'Pause' : 'Play'}
-              >
-                <Icon name={playing ? 'pause' : 'play'} size={32} color={colors.accentText} />
-              </Pressable>
-              <Pressable
-                onPress={() => isCurrent && player.seekBy(player.prefs.skipForward)}
-                hitSlop={8}
-                accessibilityRole="button"
-                accessibilityLabel={`Forward ${player.prefs.skipForward} seconds`}
-              >
-                <Icon name={skipIcon('forward', player.prefs.skipForward)} size={32} />
-              </Pressable>
-              <Pressable
-                onPress={() => shareItem({ title: episode.title, path: `/episode/${episode.id}` })}
-                style={styles.side}
-                accessibilityRole="button"
-                accessibilityLabel="Share"
-              >
-                <Icon name="share" size={22} />
-              </Pressable>
-            </View>
-            <View style={styles.secondary}>
-              <Glass style={styles.pill} interactive>
-                <Pressable style={styles.pillInner} onPress={() => router.push(`/transcript/${episode.id}`)} accessibilityRole="button">
-                  <Icon name="transcript" size={17} />
-                  <Text style={styles.pillText}>Transcript</Text>
+      <ScrollView contentInsetAdjustmentBehavior="automatic" contentContainerStyle={[styles.page, wide && styles.pageWide]}>
+        <Columns wide={wide}>
+          {hasAudio && (
+            <Glass style={styles.toggle}>
+              {(['audio', 'video'] as const).map((m) => (
+                <Pressable
+                  key={m}
+                  style={[styles.toggleItem, mode === m && styles.toggleActive]}
+                  onPress={() => switchMode(m)}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: mode === m }}
+                >
+                  <Icon name={m === 'audio' ? 'headphones' : 'video'} size={15} color={mode === m ? colors.accentText : colors.text} />
+                  <Text style={[type.footnote, { color: mode === m ? colors.accentText : colors.text, fontWeight: '700' }]}>{m === 'audio' ? 'Listen' : 'Watch'}</Text>
                 </Pressable>
-              </Glass>
-              {isCurrent && (
-                <Glass style={styles.pill} interactive>
-                  <Pressable
-                    style={styles.pillInner}
-                    onPress={() => router.push('/playback')}
-                    accessibilityRole="button"
-                    accessibilityLabel={sleepLabel ? `Sleep timer: ${sleepLabel}` : 'Sleep timer'}
-                  >
-                    <Icon name={player.sleep ? 'moonFill' : 'moon'} size={17} color={player.sleep ? colors.highlight : colors.text} />
-                    <Text style={[styles.pillText, player.sleep && { color: colors.highlight }]}>{sleepLabel ?? 'Sleep'}</Text>
-                  </Pressable>
-                </Glass>
-              )}
-            </View>
-          </>
-        )}
-
-        <View style={styles.engage}>
-          <Glass style={styles.pill} interactive>
-            <Pressable style={styles.pillInner} onPress={like.toggle} accessibilityRole="button" accessibilityLabel={like.liked ? 'Unlike' : 'Like'}>
-              <Icon name={like.liked ? 'heartFill' : 'heart'} size={18} color={like.liked ? colors.liked : colors.text} />
-              <Text style={styles.pillText}>{like.likes}</Text>
-            </Pressable>
-          </Glass>
-          <Glass style={styles.pill} interactive>
-            <Pressable style={styles.pillInner} onPress={() => router.push(`/comments/episode/${episode.id}`)} accessibilityRole="button" accessibilityLabel="Comments">
-              <Icon name="comment" size={18} />
-              <Text style={styles.pillText}>{episode.comments}</Text>
-            </Pressable>
-          </Glass>
-          {mode === 'video' && (
-            <Glass style={styles.pill} interactive>
-              <Pressable
-                style={styles.pillInner}
-                onPress={() => shareItem({ title: episode.title, path: `/episode/${episode.id}` })}
-                accessibilityRole="button"
-                accessibilityLabel="Share"
-              >
-                <Icon name="share" size={18} />
-              </Pressable>
+              ))}
             </Glass>
           )}
-          <Text style={[type.footnote, { marginLeft: 'auto', fontVariant: ['tabular-nums'] }]}>
-            {episode.views} {episode.views === 1 ? 'view' : 'views'}
-          </Text>
-        </View>
 
-        <Tags tags={episode.tags} />
-        {!!episode.summary && (
-          <View style={{ gap: spacing.xs }}>
-            <Text style={type.eyebrow}>In this episode</Text>
-            <Text style={type.body}>{episode.summary}</Text>
+          {mode === 'video' ? (
+            <EpisodeVideo key={videoStart.n} uri={episode.videoUrl} startAt={videoStart.sec} onTime={(s) => (videoTime.current = s)} style={styles.video} />
+          ) : (
+            <View style={[styles.artWrap, { width: artSize, height: artSize, boxShadow: `0 24px 60px ${glow}` }]}>
+              <Image source={{ uri: episode.artworkUrl }} style={[styles.art, { width: artSize, height: artSize }]} />
+            </View>
+          )}
+
+          <View style={styles.titleBlock}>
+            <Text style={type.eyebrow}>
+              {formatDate(episode.publishedAt)} · {formatDuration(episode.durationSec)}
+            </Text>
+            <Text style={wide ? type.display : type.title}>{episode.title}</Text>
+            {episode.author && <Text style={type.subhead}>by {episode.author.name}</Text>}
+            {currentChapter && mode === 'audio' && (
+              <Text style={[type.subhead, { color: colors.highlight, fontWeight: '700' }]} numberOfLines={1}>
+                {currentChapter.title}
+              </Text>
+            )}
           </View>
-        )}
-        {!!episode.description && <Text style={[type.body, { color: colors.textMuted }]}>{episode.description}</Text>}
 
-        {episode.mentions.length > 0 && (
-          <View>
-            <Text style={[type.eyebrow, { marginBottom: spacing.xs }]}>Mentioned in this episode</Text>
-            {episode.mentions.map((m) => (
-              <View key={`${m.startSec}-${m.name}`} style={styles.chapter}>
+          {mode === 'audio' && (
+            <>
+              <Scrubber position={position} duration={duration} onSeek={(s) => (isCurrent ? player.seekTo(s) : player.playEpisode(episode, s))} />
+              <View style={styles.controls}>
                 <Pressable
-                  onPress={() => jumpTo(m.startSec)}
-                  style={({ pressed }) => [{ flex: 1, flexDirection: 'row', gap: spacing.lg, alignItems: 'center' }, pressed && { opacity: 0.6 }]}
+                  onPress={() => router.push('/playback')}
+                  style={styles.side}
                   accessibilityRole="button"
-                  accessibilityLabel={`${m.name}, mentioned at ${formatTime(m.startSec)}`}
+                  accessibilityLabel={`Playback speed ${player.prefs.rate} times. Change speed, sleep timer and skip lengths`}
                 >
-                  <Text style={[type.footnote, styles.chapterTime]}>{formatTime(m.startSec)}</Text>
-                  <View style={{ flex: 1 }}>
-                    <Text style={type.body}>{m.name}</Text>
-                    <Text style={type.caption}>{m.kind}</Text>
-                  </View>
+                  <Text style={[type.headline, { fontVariant: ['tabular-nums'] }]}>{player.prefs.rate}×</Text>
                 </Pressable>
-                {m.url?.startsWith('https://') && (
-                  <Pressable onPress={() => Linking.openURL(m.url!)} hitSlop={10} accessibilityRole="link" accessibilityLabel={`Open ${m.name} website`}>
-                    <Icon name="link" size={20} color={colors.textMuted} />
+                <Pressable
+                  onPress={() => isCurrent && player.seekBy(-player.prefs.skipBack)}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Back ${player.prefs.skipBack} seconds`}
+                >
+                  <Icon name={skipIcon('back', player.prefs.skipBack)} size={32} />
+                </Pressable>
+                <Pressable
+                  style={({ pressed }) => [styles.playButton, pressed && { transform: [{ scale: 0.96 }] }]}
+                  onPress={() => (playing ? player.pause() : player.playEpisode(episode))}
+                  accessibilityRole="button"
+                  accessibilityLabel={playing ? 'Pause' : 'Play'}
+                >
+                  <Icon name={playing ? 'pause' : 'play'} size={32} color={colors.accentText} />
+                </Pressable>
+                <Pressable
+                  onPress={() => isCurrent && player.seekBy(player.prefs.skipForward)}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Forward ${player.prefs.skipForward} seconds`}
+                >
+                  <Icon name={skipIcon('forward', player.prefs.skipForward)} size={32} />
+                </Pressable>
+                <Pressable
+                  onPress={() => shareItem({ title: episode.title, path: `/episode/${episode.id}` })}
+                  style={styles.side}
+                  accessibilityRole="button"
+                  accessibilityLabel="Share"
+                >
+                  <Icon name="share" size={22} />
+                </Pressable>
+              </View>
+              <View style={styles.secondary}>
+                <Glass style={styles.pill} interactive>
+                  <Pressable style={styles.pillInner} onPress={() => router.push(`/transcript/${episode.id}`)} accessibilityRole="button">
+                    <Icon name="transcript" size={17} />
+                    <Text style={styles.pillText}>Transcript</Text>
                   </Pressable>
+                </Glass>
+                {isCurrent && (
+                  <Glass style={styles.pill} interactive>
+                    <Pressable
+                      style={styles.pillInner}
+                      onPress={() => router.push('/playback')}
+                      accessibilityRole="button"
+                      accessibilityLabel={sleepLabel ? `Sleep timer: ${sleepLabel}` : 'Sleep timer'}
+                    >
+                      <Icon name={player.sleep ? 'moonFill' : 'moon'} size={17} color={player.sleep ? colors.highlight : colors.text} />
+                      <Text style={[styles.pillText, player.sleep && { color: colors.highlight }]}>{sleepLabel ?? 'Sleep'}</Text>
+                    </Pressable>
+                  </Glass>
                 )}
               </View>
-            ))}
-          </View>
-        )}
+            </>
+          )}
 
-        {episode.chapters.length > 0 && (
-          <View>
-            <Text style={[type.eyebrow, { marginBottom: spacing.xs }]}>Chapters</Text>
-            {episode.chapters.map((c) => {
-              const active = c === currentChapter && isCurrent;
-              return (
+          <View style={styles.engage}>
+            <Glass style={styles.pill} interactive>
+              <Pressable style={styles.pillInner} onPress={like.toggle} accessibilityRole="button" accessibilityLabel={like.liked ? 'Unlike' : 'Like'}>
+                <Icon name={like.liked ? 'heartFill' : 'heart'} size={18} color={like.liked ? colors.liked : colors.text} />
+                <Text style={styles.pillText}>{like.likes}</Text>
+              </Pressable>
+            </Glass>
+            <Glass style={styles.pill} interactive>
+              <Pressable style={styles.pillInner} onPress={() => router.push(`/comments/episode/${episode.id}`)} accessibilityRole="button" accessibilityLabel="Comments">
+                <Icon name="comment" size={18} />
+                <Text style={styles.pillText}>{episode.comments}</Text>
+              </Pressable>
+            </Glass>
+            {mode === 'video' && (
+              <Glass style={styles.pill} interactive>
                 <Pressable
-                  key={c.startSec}
-                  style={({ pressed }) => [styles.chapter, pressed && { opacity: 0.6 }]}
-                  onPress={() => jumpTo(c.startSec)}
+                  style={styles.pillInner}
+                  onPress={() => shareItem({ title: episode.title, path: `/episode/${episode.id}` })}
                   accessibilityRole="button"
-                  accessibilityLabel={`${c.title}, at ${formatTime(c.startSec)}${active ? ', playing now' : ''}`}
+                  accessibilityLabel="Share"
                 >
-                  <Text style={[type.footnote, styles.chapterTime, active && { color: colors.highlight }]}>{formatTime(c.startSec)}</Text>
-                  <Text style={[type.body, { flex: 1 }, active && { color: colors.highlight, fontWeight: '700' }]}>{c.title}</Text>
-                  {active && <Text style={[type.caption, { color: colors.highlight }]}>NOW</Text>}
+                  <Icon name="share" size={18} />
                 </Pressable>
-              );
-            })}
+              </Glass>
+            )}
+            <Text style={[type.footnote, { marginLeft: 'auto', fontVariant: ['tabular-nums'] }]}>
+              {episode.views} {episode.views === 1 ? 'view' : 'views'}
+            </Text>
           </View>
-        )}
+
+        </Columns>
+        <Columns wide={wide} second>
+          <Tags tags={episode.tags} />
+          {!!episode.summary && (
+            <View style={{ gap: spacing.xs }}>
+              <Text style={type.eyebrow}>In this episode</Text>
+              <Text style={type.body}>{episode.summary}</Text>
+            </View>
+          )}
+          {!!episode.description && <Text style={[type.body, { color: colors.textMuted }]}>{episode.description}</Text>}
+
+          {episode.mentions.length > 0 && (
+            <View>
+              <Text style={[type.eyebrow, { marginBottom: spacing.xs }]}>Mentioned in this episode</Text>
+              {episode.mentions.map((m) => (
+                <View key={`${m.startSec}-${m.name}`} style={styles.chapter}>
+                  <Pressable
+                    onPress={() => jumpTo(m.startSec)}
+                    style={({ pressed }) => [{ flex: 1, flexDirection: 'row', gap: spacing.lg, alignItems: 'center' }, pressed && { opacity: 0.6 }]}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${m.name}, mentioned at ${formatTime(m.startSec)}`}
+                  >
+                    <Text style={[type.footnote, styles.chapterTime]}>{formatTime(m.startSec)}</Text>
+                    <View style={{ flex: 1 }}>
+                      <Text style={type.body}>{m.name}</Text>
+                      <Text style={type.caption}>{m.kind}</Text>
+                    </View>
+                  </Pressable>
+                  {m.url?.startsWith('https://') && (
+                    <Pressable onPress={() => Linking.openURL(m.url!)} hitSlop={10} accessibilityRole="link" accessibilityLabel={`Open ${m.name} website`}>
+                      <Icon name="link" size={20} color={colors.textMuted} />
+                    </Pressable>
+                  )}
+                </View>
+              ))}
+            </View>
+          )}
+
+          {episode.chapters.length > 0 && (
+            <View>
+              <Text style={[type.eyebrow, { marginBottom: spacing.xs }]}>Chapters</Text>
+              {episode.chapters.map((c) => {
+                const active = c === currentChapter && isCurrent;
+                return (
+                  <Pressable
+                    key={c.startSec}
+                    style={({ pressed }) => [styles.chapter, pressed && { opacity: 0.6 }]}
+                    onPress={() => jumpTo(c.startSec)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${c.title}, at ${formatTime(c.startSec)}${active ? ', playing now' : ''}`}
+                  >
+                    <Text style={[type.footnote, styles.chapterTime, active && { color: colors.highlight }]}>{formatTime(c.startSec)}</Text>
+                    <Text style={[type.body, { flex: 1 }, active && { color: colors.highlight, fontWeight: '700' }]}>{c.title}</Text>
+                    {active && <Text style={[type.caption, { color: colors.highlight }]}>NOW</Text>}
+                  </Pressable>
+                );
+              })}
+            </View>
+          )}
+        </Columns>
       </ScrollView>
     </View>
   );
 }
 
+// On wide screens the page is two side-by-side columns; on phones, one.
+// (`second` marks the right-hand one.) Rendered as fragments when narrow.
+function Columns({ wide, second, children }: { wide: boolean; second?: boolean; children: React.ReactNode }) {
+  if (!wide) return <>{children}</>;
+  return <View style={second ? styles.rightCol : styles.leftCol}>{children}</View>;
+}
+
 const styles = StyleSheet.create({
   page: { paddingHorizontal: spacing.xxl, paddingBottom: spacing.huge, gap: spacing.xxl },
+  pageWide: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.huge, width: '100%', maxWidth: 1240, alignSelf: 'center', paddingHorizontal: spacing.xxxl, paddingTop: spacing.huge },
+  leftCol: { width: 480, gap: spacing.xxl },
+  rightCol: { flex: 1, minWidth: 0, gap: spacing.xxl, paddingTop: spacing.sm },
   toggle: { flexDirection: 'row', alignSelf: 'center', borderRadius: radius.full, padding: 3 },
   toggleItem: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs + 2, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm, borderRadius: radius.full },
   toggleActive: { backgroundColor: colors.accent },

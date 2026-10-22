@@ -50,6 +50,13 @@ const ICONS = {
   edit: { sf: 'pencil', ion: 'pencil' },
   chevronRight: { sf: 'chevron.right', ion: 'chevron-forward' },
   warning: { sf: 'exclamationmark.triangle', ion: 'warning-outline' },
+  home: { sf: 'house', ion: 'home-outline' },
+  shorts: { sf: 'play.rectangle.on.rectangle', ion: 'albums-outline' },
+  person: { sf: 'person.crop.circle', ion: 'person-circle-outline' },
+  shield: { sf: 'checkmark.shield', ion: 'shield-checkmark-outline' },
+  chevronUp: { sf: 'chevron.up', ion: 'chevron-up' },
+  chevronLeft: { sf: 'chevron.left', ion: 'chevron-back' },
+  film: { sf: 'film', ion: 'film-outline' },
 } as const satisfies Record<string, { sf: SFSymbol; ion: keyof typeof Ionicons.glyphMap }>;
 
 export type IconName = keyof typeof ICONS;

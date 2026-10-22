@@ -2,10 +2,11 @@ const express = require('express');
 const { httpError } = require('./store');
 const { num, str, tags } = require('./validate');
 
-// Posting Shorts from the app, open to everyone: a name and the guidelines
-// first, then upload (optionally keeping only part of the video), details
-// with the AI's suggestions, and the person's own Shorts with their status.
-// Everything posted waits for a host to approve it.
+// Posting Shorts (phone or website) and episodes (website), open to
+// everyone: a name and the guidelines first, then upload (a Short can keep
+// only part of the video), details with the AI's suggestions, and the
+// person's own posts with their status. Everything posted waits for a host
+// to approve it.
 //
 // "Me" is req.user: a device until sign-in exists.
 
@@ -29,11 +30,15 @@ function meRouter({ store, engagement, baseUrl }) {
     })
   );
 
-  // Up to 10 minutes of video, of which at most a Short's length is kept.
+  // kind "short" (the default): up to 10 minutes of video, of which at most a
+  // Short's length is kept. kind "episode": a long video, kept whole.
   r.post(
     '/uploads',
     ah(async (req, res) => {
       const b = req.body || {};
+      const kind = b.kind ?? 'short';
+      if (!['short', 'episode'].includes(kind)) throw httpError(400, 'kind must be "short" or "episode"');
+      if (kind === 'episode' && (b.startSec !== undefined || b.endSec !== undefined)) throw httpError(400, 'Episodes are kept whole');
       const startSec = num(b.startSec, 'startSec', { min: 0, max: 600 });
       const endSec = num(b.endSec, 'endSec', { min: 0, max: 600 });
       if ((startSec === undefined) !== (endSec === undefined)) throw httpError(400, 'Send both startSec and endSec, or neither');
@@ -42,7 +47,7 @@ function meRouter({ store, engagement, baseUrl }) {
         if (endSec - startSec < 1) throw httpError(400, 'Keep at least a second');
         if (endSec - startSec > maxShortSec + 0.5) throw httpError(400, `A Short can be at most ${maxShortSec} seconds`);
       }
-      res.status(201).json(await store.createUserUpload(req.user.id, { startSec, endSec }));
+      res.status(201).json(await store.createUserUpload(req.user.id, { kind, startSec, endSec }));
     })
   );
 
@@ -91,6 +96,45 @@ function meRouter({ store, engagement, baseUrl }) {
     '/shorts/:id',
     ah(async (req, res) => {
       await store.deleteMyShort(req.user.id, req.params.id);
+      res.status(204).end();
+    })
+  );
+
+  // Episodes: the same, without trimming. The cover is a time in the video.
+  const episodeDetails = (b) => {
+    const { coverSec, ...rest } = details(b);
+    return { ...rest, thumbnailSec: coverSec };
+  };
+  const mineEpisode = async (req, id) =>
+    (await engagement.withStats('episode', await store.myEpisodes(req.user.id, baseUrl(req)), req.user.id)).find((e) => e.id === id);
+
+  r.get('/episodes', ah(async (req, res) => res.json(await engagement.withStats('episode', await store.myEpisodes(req.user.id, baseUrl(req)), req.user.id))));
+
+  r.post(
+    '/episodes',
+    ah(async (req, res) => {
+      const b = req.body || {};
+      const d = episodeDetails(b);
+      if (!d.title) throw httpError(400, 'title is required');
+      const id = await store.createUserEpisode(req.user.id, { ...d, videoId: str(b.videoId, 'videoId', { required: true }) });
+      res.status(201).json(await mineEpisode(req, id));
+    })
+  );
+
+  r.patch(
+    '/episodes/:id',
+    ah(async (req, res) => {
+      const d = episodeDetails(req.body || {});
+      if (d.title === '') throw httpError(400, 'title is required');
+      await store.updateMyEpisode(req.user.id, req.params.id, d);
+      res.json(await mineEpisode(req, req.params.id));
+    })
+  );
+
+  r.delete(
+    '/episodes/:id',
+    ah(async (req, res) => {
+      await store.deleteMyEpisode(req.user.id, req.params.id);
       res.status(204).end();
     })
   );

@@ -1,25 +1,16 @@
-import { Platform, Text, View } from 'react-native';
 import { Stack } from 'expo-router';
-import { PostProvider } from '../../components/post/PostContext';
-import { colors, spacing, type } from '../../theme';
+import { colors } from '../../theme';
 
-// The ＋ tab's screens, over everything: camera, trim, then details.
+// The posting screens, over everything: camera (phone), trim, then details.
+// On the website, posting starts from the New page and comes here to trim
+// and add the details.
 export default function PostLayout() {
-  if (Platform.OS === 'web') {
-    return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xxxl, backgroundColor: colors.bg }}>
-        <Text style={[type.subhead, { textAlign: 'center' }]}>Post Shorts from the AI Dev Wave app on your phone.</Text>
-      </View>
-    );
-  }
   return (
-    <PostProvider>
-      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.bg } }}>
-        <Stack.Screen name="index" options={{ contentStyle: { backgroundColor: '#000' } }} />
-        <Stack.Screen name="preview" options={{ contentStyle: { backgroundColor: '#000' } }} />
-        {/* Reached with replace, once the upload has started, so there's no going back to trim. */}
-        <Stack.Screen name="details" options={{ gestureEnabled: false }} />
-      </Stack>
-    </PostProvider>
+    <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.bg } }}>
+      <Stack.Screen name="index" options={{ contentStyle: { backgroundColor: '#000' } }} />
+      <Stack.Screen name="preview" options={{ contentStyle: { backgroundColor: '#000' } }} />
+      {/* Reached with replace, once the upload has started, so there's no going back to trim. */}
+      <Stack.Screen name="details" options={{ gestureEnabled: false }} />
+    </Stack>
   );
 }

@@ -1,22 +1,29 @@
-import { File } from 'expo-file-system';
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
-import { api } from '../../lib/api';
+import { Platform } from 'react-native';
+import { Redirect } from 'expo-router';
+import { api, type PostKind } from '../../lib/api';
+import { uploadFile } from './uploadFile';
 
-// The Short being posted from the ＋ tab, shared by its screens (camera,
-// trim, details). The upload starts when the person leaves the trim screen
-// and carries on in the background while they fill in the details.
+// The Short or episode being posted, shared by the posting screens (camera or
+// file choice, trim, details). The upload starts when the person leaves the
+// trim screen and carries on in the background while they fill in the details.
+// Episodes are posted from the website only and are never trimmed.
 
-export type Picked = { uri: string; durationSec: number | null };
+// `file` is the browser's File on the web; the phone uses `uri`.
+export type Picked = { uri: string; durationSec: number | null; kind?: PostKind; file?: Blob };
 export type Upload = { videoId: string | null; percent: number; done: boolean; error: string | null };
 
 type PostValue = {
   picked: Picked | null;
   setPicked: (p: Picked | null) => void;
   upload: Upload | null;
-  // range: the part to keep, when not the whole video.
-  startUpload: (range?: { startSec: number; endSec: number }) => void;
+  // range: the part to keep, when not the whole video. `video` uploads that
+  // instead of `picked` (when it's only just been chosen).
+  startUpload: (range?: { startSec: number; endSec: number }, video?: Picked) => void;
   // Tries again with the same range after a failure.
   retryUpload: () => void;
+  // Stops any upload and forgets the video (after posting or discarding).
+  reset: () => void;
 };
 
 const PostContext = createContext<PostValue | null>(null);
@@ -27,35 +34,36 @@ export function usePost() {
   return value;
 }
 
+// For the trim and details screens when there's no video (e.g. the page was
+// reloaded): back to the start. It waits a moment first, since the video is
+// chosen and the screen opened in the same instant.
+export function NoVideo() {
+  const [waited, setWaited] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setWaited(true), 500);
+    return () => clearTimeout(t);
+  }, []);
+  return waited ? <Redirect href={Platform.OS === 'web' ? '/create' : '/post'} /> : null;
+}
+
 export function PostProvider({ children }: { children: ReactNode }) {
   const [picked, setPicked] = useState<Picked | null>(null);
   const [upload, setUpload] = useState<Upload | null>(null);
   const abort = useRef<AbortController | null>(null);
-  const lastRange = useRef<{ startSec: number; endSec: number } | undefined>(undefined);
+  const last = useRef<{ range?: { startSec: number; endSec: number }; video?: Picked }>({});
 
-  // Closing the ＋ screens stops an unfinished upload.
-  useEffect(() => () => abort.current?.abort(), []);
-
-  const startUpload = (range?: { startSec: number; endSec: number }) => {
-    if (!picked) return;
-    lastRange.current = range;
+  const startUpload = (range?: { startSec: number; endSec: number }, video: Picked | null = picked) => {
+    if (!video) return;
+    last.current = { range, video };
     abort.current?.abort();
     const controller = new AbortController();
     abort.current = controller;
     setUpload({ videoId: null, percent: 0, done: false, error: null });
     (async () => {
       try {
-        const { videoId, uploadUrl } = await api.createUpload(range);
+        const { videoId, uploadUrl } = await api.createUpload(video.kind ?? 'short', range);
         setUpload((u) => u && { ...u, videoId });
-        // A Short is small enough to send in one request, straight to the video service.
-        const task = new File(picked.uri).createUploadTask(uploadUrl, {
-          httpMethod: 'PUT',
-          signal: controller.signal,
-          onProgress: ({ bytesSent, totalBytes }) =>
-            totalBytes > 0 && setUpload((u) => u && { ...u, percent: Math.round((bytesSent / totalBytes) * 100) }),
-        });
-        const res = await task.uploadAsync();
-        if (res.status >= 300) throw new Error(`Upload failed (${res.status})`);
+        await uploadFile(video, uploadUrl, { signal: controller.signal, onProgress: (percent) => setUpload((u) => u && { ...u, percent }) });
         setUpload((u) => u && { ...u, percent: 100, done: true });
       } catch (e) {
         if (controller.signal.aborted) return;
@@ -64,5 +72,14 @@ export function PostProvider({ children }: { children: ReactNode }) {
     })();
   };
 
-  return <PostContext.Provider value={{ picked, setPicked, upload, startUpload, retryUpload: () => startUpload(lastRange.current) }}>{children}</PostContext.Provider>;
+  const reset = () => {
+    abort.current?.abort();
+    abort.current = null;
+    setPicked(null);
+    setUpload(null);
+  };
+
+  return (
+    <PostContext.Provider value={{ picked, setPicked, upload, startUpload, retryUpload: () => startUpload(last.current.range, last.current.video), reset }}>{children}</PostContext.Provider>
+  );
 }

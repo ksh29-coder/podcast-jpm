@@ -174,6 +174,8 @@ function hostRouter({ store, engagement, baseUrl, passcode, db }) {
         mentions: mentions(b.mentions),
         speakers: speakers(b.speakers),
         thumbnailSec: num(b.thumbnailSec, 'thumbnailSec', { min: 0 }),
+        // Shown to the uploader when a posted episode isn't approved.
+        reviewNote: b.reviewNote === null ? null : str(b.reviewNote, 'reviewNote', { max: 500 }),
         status: status(b.status),
         publishAt: publishAt(b.publishAt, b.status),
       }, baseUrl(req));

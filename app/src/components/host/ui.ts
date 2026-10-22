@@ -1,9 +1,10 @@
-import { StyleSheet } from 'react-native';
+import { Platform, StyleSheet } from 'react-native';
 import { colors } from '../../theme';
 
 // Shared styles for the host screens (forms, buttons, status chips).
 export const ui = StyleSheet.create({
-  page: { padding: 20, paddingBottom: 48, gap: 12, width: '100%', maxWidth: 820, alignSelf: 'center' },
+  // Wider in the website's Host Studio, which has room beside its sidebar.
+  page: { padding: 20, paddingBottom: 48, gap: 12, width: '100%', maxWidth: Platform.OS === 'web' ? 1040 : 820, alignSelf: 'center' },
   section: { color: colors.text, fontSize: 17, fontWeight: '700', marginTop: 16 },
   label: { color: colors.textMuted, fontSize: 13, fontWeight: '600', marginTop: 4 },
   hint: { color: colors.textMuted, fontSize: 13, lineHeight: 18 },

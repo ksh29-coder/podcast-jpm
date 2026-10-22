@@ -1,4 +1,3 @@
-import { Platform } from 'react-native';
 import { router } from 'expo-router';
 import { NativeTabs } from 'expo-router/unstable-native-tabs';
 import { MiniPlayer } from '../../components/MiniPlayer';
@@ -28,8 +27,8 @@ export default function TabsLayout() {
       {/* ＋ opens the camera over everything instead of switching tabs. */}
       <NativeTabs.Trigger
         name="create"
-        disabled={Platform.OS !== 'web'}
-        listeners={{ tabPress: () => Platform.OS !== 'web' && router.push('/post') }}
+        disabled
+        listeners={{ tabPress: () => router.push('/post') }}
         contentStyle={{ backgroundColor: colors.bg }}
       >
         <NativeTabs.Trigger.Label>New</NativeTabs.Trigger.Label>

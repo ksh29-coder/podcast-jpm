@@ -1,10 +1,10 @@
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Image, KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { Redirect, router, useNavigation } from 'expo-router';
+import { ActivityIndicator, Alert, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { router, useNavigation } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from '../../components/Icon';
-import { usePost, type Upload } from '../../components/post/PostContext';
+import { NoVideo, usePost, type Upload } from '../../components/post/PostContext';
 import { TagsField } from '../../components/post/TagsField';
 import { api, type UploadState } from '../../lib/api';
 import { formatTime } from '../../lib/format';
@@ -16,7 +16,8 @@ import { colors, radius, spacing, type } from '../../theme';
 // offered underneath instead.
 export default function PostDetails() {
   const insets = useSafeAreaInsets();
-  const { picked, upload, retryUpload } = usePost();
+  const { picked, upload, retryUpload, reset } = usePost();
+  const isEpisode = picked?.kind === 'episode';
   // The ＋ screens' own stack; its parent is the app's, where they sit as one overlay.
   const navigation = useNavigation();
   const close = () => navigation.getParent()?.goBack();
@@ -64,7 +65,7 @@ export default function PostDetails() {
     };
   }, [videoId, uploaded]);
 
-  if (!picked || !upload) return <Redirect href="/post" />;
+  if (!picked || !upload) return <NoVideo />;
 
   const sug = state?.suggestions;
   const canPost = !!title.trim() && uploaded && !!videoId && state?.status !== 'errored' && !posting;
@@ -74,7 +75,9 @@ export default function PostDetails() {
     setPosting(true);
     setError(null);
     try {
-      await api.postShort(videoId, { title: title.trim(), description: description.trim(), tags, ...(coverSec != null && { coverSec }) });
+      const details = { title: title.trim(), description: description.trim(), tags, ...(coverSec != null && { coverSec }) };
+      await (isEpisode ? api.postEpisode(videoId, details) : api.postShort(videoId, details));
+      reset();
       close();
       router.navigate('/me?posted=1');
     } catch (e) {
@@ -84,15 +87,22 @@ export default function PostDetails() {
   };
 
   const discard = () => {
-    Alert.alert('Discard this Short?', 'The video won’t be posted.', [
+    const go = () => {
+      if (videoId) api.discardUpload(videoId).catch(() => {});
+      reset();
+      close();
+    };
+    // The browser has no native alert sheet; confirm() is the plain equivalent.
+    if (Platform.OS === 'web') {
+      if (globalThis.confirm?.('Discard this upload? The video won’t be posted.')) go();
+      return;
+    }
+    Alert.alert(isEpisode ? 'Discard this episode?' : 'Discard this Short?', 'The video won’t be posted.', [
       { text: 'Keep editing', style: 'cancel' },
       {
         text: 'Discard',
         style: 'destructive',
-        onPress: () => {
-          if (videoId) api.discardUpload(videoId).catch(() => {});
-          close();
-        },
+        onPress: go,
       },
     ]);
   };
@@ -103,12 +113,12 @@ export default function PostDetails() {
         <Pressable onPress={discard} hitSlop={10} accessibilityRole="button" accessibilityLabel="Discard">
           <Icon name="close" size={22} />
         </Pressable>
-        <Text style={type.headline}>Details</Text>
+        <Text style={type.headline}>{isEpisode ? 'Episode details' : 'Details'}</Text>
         <View style={{ width: 22 }} />
       </View>
       <ScrollView contentContainerStyle={[styles.page, { paddingBottom: insets.bottom + spacing.xxxl }]} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
         <View style={styles.top}>
-          <Preview uri={picked.uri} />
+          <Preview uri={picked.uri} wide={isEpisode} />
           <View style={{ flex: 1, gap: spacing.sm }}>
             <Progress state={state} upload={upload} onRetry={retryUpload} />
           </View>
@@ -120,7 +130,7 @@ export default function PostDetails() {
             value={title}
             onChangeText={setTitle}
             maxLength={100}
-            placeholder={sug && sug.status !== 'unavailable' && sug.status !== 'ready' ? 'Suggesting…' : 'What’s this Short about?'}
+            placeholder={sug && sug.status !== 'unavailable' && sug.status !== 'ready' ? 'Suggesting…' : isEpisode ? 'What’s this episode about?' : 'What’s this Short about?'}
             placeholderTextColor={colors.textFaint}
             accessibilityLabel="Title"
           />
@@ -262,21 +272,23 @@ function Offer({ value, current, onUse }: { value: string | null | undefined; cu
   );
 }
 
-function Preview({ uri }: { uri: string }) {
+function Preview({ uri, wide }: { uri: string; wide?: boolean }) {
   const player = useVideoPlayer(uri, (p) => {
     p.loop = true;
     p.muted = true;
     p.play();
   });
-  return <VideoView player={player} style={styles.preview} contentFit="cover" nativeControls={false} />;
+  return <VideoView player={player} style={wide ? styles.previewWide : styles.preview} contentFit="cover" nativeControls={false} />;
 }
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: spacing.xl, paddingBottom: spacing.sm },
-  page: { padding: spacing.xl, gap: spacing.xl },
+  // A readable column on wide (web) screens.
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: spacing.xl, paddingBottom: spacing.sm, width: '100%', maxWidth: 760, alignSelf: 'center' },
+  page: { padding: spacing.xl, gap: spacing.xl, width: '100%', maxWidth: 760, alignSelf: 'center' },
   top: { flexDirection: 'row', gap: spacing.lg, alignItems: 'center' },
   preview: { width: 90, height: 160, borderRadius: radius.md, backgroundColor: '#000' },
+  previewWide: { width: 192, height: 108, borderRadius: radius.md, backgroundColor: '#000' },
   line: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   track: { height: 6, borderRadius: 3, backgroundColor: colors.border, overflow: 'hidden' },
   fill: { height: 6, backgroundColor: colors.highlight },

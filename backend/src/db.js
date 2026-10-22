@@ -195,6 +195,10 @@ alter table shorts add column if not exists description text not null default ''
 alter table shorts add column if not exists cover_sec double precision;
 -- Why a host didn't approve it, shown to the uploader.
 alter table shorts add column if not exists review_note text;
+-- Episodes can be posted by anyone from the website too, and wait in_review
+-- the same way. null author for episodes hosts made.
+alter table episodes add column if not exists author_id text;
+alter table episodes add column if not exists review_note text;
 `;
 
 // Creates the tables if needed, and fills an empty database from
