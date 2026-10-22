@@ -42,6 +42,12 @@ test('a session gets a short-lived key, the instructions and the tools', async (
   assert.strictEqual((await call(null)('POST', '/api/assistant/session')).status, 400);
 });
 
+test('a conversation can use a chosen voice, but only a real one', async () => {
+  assert.strictEqual((await alice('POST', '/api/assistant/session', { voice: 'cedar' })).status, 200);
+  assert.strictEqual(sessions.at(-1).voice, 'cedar');
+  assert.strictEqual((await alice('POST', '/api/assistant/session', { voice: 'robot' })).status, 400);
+});
+
 test('each person gets 10 minutes a day, 3 at a time', async () => {
   assert.strictEqual((await alice('POST', '/api/assistant/usage', { seconds: 'x' })).status, 400);
   // A report longer than a session counts as one session.

@@ -197,7 +197,7 @@ export const api = {
   deleteMyEpisode: (id: string) => request<void>(`/api/me/episodes/${id}`, { method: 'DELETE' }),
   // The voice assistant: a short-lived key for one conversation, how long it
   // lasted, and its tools (run on our server).
-  assistantSession: () => request<AssistantSession>('/api/assistant/session', { method: 'POST' }),
+  assistantSession: (voice?: string) => request<AssistantSession>('/api/assistant/session', { method: 'POST', body: JSON.stringify({ voice }) }),
   assistantUsage: (seconds: number) => request<{ leftTodaySec: number }>('/api/assistant/usage', { method: 'POST', body: JSON.stringify({ seconds }) }),
   assistantTool: (name: string, args: unknown) => request<unknown>(`/api/assistant/tools/${name}`, { method: 'POST', body: JSON.stringify(args ?? {}) }),
   saveProgress: (episodeId: string, positionSec: number) =>

@@ -6,13 +6,17 @@
 //
 // Currently OpenAI Realtime: https://developers.openai.com/api/docs/guides/realtime-webrtc
 
-function openAiVoice({ apiKey = process.env.OPENAI_API_KEY, model = process.env.OPENAI_REALTIME_MODEL || 'gpt-realtime-2.1', voice = 'marin' } = {}) {
+// The voices people can pick from (the service rejects anything else).
+const VOICES = ['marin', 'cedar', 'coral', 'ash', 'sage', 'verse', 'shimmer', 'echo', 'ballad', 'alloy'];
+
+function openAiVoice({ apiKey = process.env.OPENAI_API_KEY, model = process.env.OPENAI_REALTIME_MODEL || 'gpt-realtime-2.1', defaultVoice = 'marin' } = {}) {
   if (!apiKey) return null;
   return {
     model,
+    voices: VOICES,
     // A key the app uses for one conversation. `tools` are run by the app,
     // which calls our backend for them.
-    async createSession({ instructions, tools }) {
+    async createSession({ instructions, tools, voice = defaultVoice }) {
       const res = await fetch('https://api.openai.com/v1/realtime/client_secrets', {
         method: 'POST',
         headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
@@ -40,4 +44,4 @@ function openAiVoice({ apiKey = process.env.OPENAI_API_KEY, model = process.env.
   };
 }
 
-module.exports = { openAiVoice };
+module.exports = { openAiVoice, VOICES };

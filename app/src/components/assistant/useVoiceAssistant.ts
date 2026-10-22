@@ -18,7 +18,9 @@ export type Card =
 type Found = Record<string, Card>;
 const momentKey = (id: string, sec: number) => `${id}@${Math.round(sec)}`;
 
-export function useVoiceAssistant() {
+// `voice`: how it sounds. Choosing another voice means a new conversation
+// (the screen remounts this with the new voice).
+export function useVoiceAssistant(voice: string) {
   const { pause } = usePlayer();
   const [state, setState] = useState<AssistantState>('connecting');
   const [error, setError] = useState<string | null>(null);
@@ -107,7 +109,7 @@ export function useVoiceAssistant() {
       try {
         // An episode playing would talk over the assistant.
         pause();
-        const session = await api.assistantSession();
+        const session = await api.assistantSession(voice);
         if (cancelled) return;
         const c = await connectVoice({ token: session.token, connectUrl: session.connectUrl, onEvent });
         if (cancelled) return c.close();
