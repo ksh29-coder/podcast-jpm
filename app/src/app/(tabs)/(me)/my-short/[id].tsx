@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
+import { CaptionsEditor } from '../../../../components/engage/CaptionsEditor';
 import { TagsField } from '../../../../components/post/TagsField';
-import { api, type MyEpisode, type MyShort } from '../../../../lib/api';
+import { api, type Cue, type MyEpisode, type MyShort } from '../../../../lib/api';
 import { colors, radius, spacing, type } from '../../../../theme';
 
 // Change a Short's or episode's details while it waits for review.
@@ -31,6 +32,9 @@ export default function EditMyShort() {
     );
   }, [id, isEpisode]);
 
+  const loadCaptions = useCallback(() => api.myShortCaptions(id), [id]);
+  const saveCaptions = useCallback((cues: Cue[]) => api.saveMyShortCaptions(id, cues), [id]);
+
   if (!short) return error ? <Text style={[styles.error, { padding: spacing.xl }]}>{error}</Text> : <ActivityIndicator style={{ flex: 1 }} color={colors.text} />;
 
   const save = async () => {
@@ -54,6 +58,7 @@ export default function EditMyShort() {
       <TextInput style={[styles.input, { minHeight: 96, textAlignVertical: 'top' }]} value={description} onChangeText={setDescription} maxLength={1000} multiline accessibilityLabel="Description" />
       <Text style={type.eyebrow}>Tags</Text>
       <TagsField tags={tags} onChange={setTags} />
+      {!isEpisode && <CaptionsEditor load={loadCaptions} save={short.status === 'in_review' ? saveCaptions : undefined} hints={() => ({ title, description, tags })} />}
       {error && <Text style={styles.error}>{error}</Text>}
       <Pressable style={[styles.button, (busy || !title.trim()) && { opacity: 0.4 }]} disabled={busy || !title.trim()} onPress={save} accessibilityRole="button">
         <Text style={styles.buttonText}>{busy ? 'Saving…' : 'Save'}</Text>

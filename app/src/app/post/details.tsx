@@ -1,12 +1,13 @@
 import { useVideoPlayer, VideoView } from 'expo-video';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { router, useNavigation } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { CaptionsEditor } from '../../components/engage/CaptionsEditor';
 import { Icon } from '../../components/Icon';
 import { NoVideo, usePost, type Upload } from '../../components/post/PostContext';
 import { TagsField } from '../../components/post/TagsField';
-import { api, type UploadState } from '../../lib/api';
+import { api, type Cue, type UploadState } from '../../lib/api';
 import { formatTime } from '../../lib/format';
 import { colors, radius, spacing, type } from '../../theme';
 
@@ -64,6 +65,9 @@ export default function PostDetails() {
       clearTimeout(timer);
     };
   }, [videoId, uploaded]);
+
+  const loadCaptions = useCallback(() => api.uploadCaptions(videoId!), [videoId]);
+  const saveCaptions = useCallback((cues: Cue[]) => api.saveUploadCaptions(videoId!, cues), [videoId]);
 
   if (!picked || !upload) return <NoVideo />;
 
@@ -184,6 +188,15 @@ export default function PostDetails() {
             <Text style={type.footnote}>Frames to choose from appear once the video is processed.</Text>
           )}
         </Field>
+
+        {!isEpisode && videoId && uploaded && state?.status !== 'errored' && (
+          <CaptionsEditor
+            load={loadCaptions}
+            save={saveCaptions}
+            hints={() => ({ title, description, tags })}
+            waiting={!sug || sug.status === 'none' || sug.status === 'generating'}
+          />
+        )}
 
         <View style={styles.note}>
           <Icon name="checkCircle" size={16} color={colors.textMuted} />

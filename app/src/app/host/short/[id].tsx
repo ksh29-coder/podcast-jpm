@@ -1,13 +1,15 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
+import { CaptionsEditor } from '../../../components/engage/CaptionsEditor';
 import { useHost } from '../../../components/host/HostGate';
 import { Schedule } from '../../../components/host/Schedule';
 import { ui } from '../../../components/host/ui';
+import type { Cue } from '../../../lib/api';
 import { parseTags, videoLabel, type HostShort } from '../../../lib/host';
 import { colors, spacing, type } from '../../../theme';
 
-// Edit a Short: title, tags, and when it goes live.
+// Edit a Short: title, tags, captions, and when it goes live.
 export default function EditShort() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { api } = useHost();
@@ -31,6 +33,9 @@ export default function EditShort() {
       (e) => setMessage({ text: e instanceof Error ? e.message : String(e), error: true })
     );
   }, [api, id]);
+
+  const loadCaptions = useCallback(() => api.shortCaptions(id), [api, id]);
+  const saveCaptions = useCallback((cues: Cue[]) => api.saveShortCaptions(id, cues), [api, id]);
 
   if (!short) {
     return message ? <Text style={[ui.error, { padding: spacing.xl }]}>{message.text}</Text> : <ActivityIndicator style={{ flex: 1 }} color={colors.text} />;
@@ -73,6 +78,9 @@ export default function EditShort() {
         >
           <Text style={ui.buttonText}>{saving ? 'Saving…' : 'Save changes'}</Text>
         </Pressable>
+      </View>
+      <View style={styles.section}>
+        <CaptionsEditor load={loadCaptions} save={saveCaptions} hints={() => ({ title, tags: parseTags(tags) })} waiting={!!videoLabel(short.video)} />
       </View>
     </ScrollView>
   );

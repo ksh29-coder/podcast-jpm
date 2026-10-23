@@ -55,7 +55,7 @@ function createApp({ db = connect(), video = muxVideo(), ai = openRouterAi(), tr
     res.json({
       service: 'AI Dev Wave backend',
       ok: true,
-      endpoints: ['/api/episodes', '/api/episodes/:id', '/api/episodes/:id/transcript', '/api/search?q=', '/api/shorts', '/api/progress', '/api/items/*', '/api/me/*', '/api/assistant/*', '/api/host/*', '/media/*'],
+      endpoints: ['/api/episodes', '/api/episodes/:id', '/api/episodes/:id/transcript', '/api/search?q=', '/api/shorts', '/api/shorts/:id/captions', '/api/progress', '/api/items/*', '/api/me/*', '/api/assistant/*', '/api/host/*', '/media/*'],
     });
   });
 
@@ -123,6 +123,12 @@ function createApp({ db = connect(), video = muxVideo(), ai = openRouterAi(), tr
   app.get(
     '/api/shorts',
     ah(async (req, res) => res.json(await engagement.withStats('short', await store.listShorts(baseUrl(req)), req.user.id)))
+  );
+
+  // A live Short's captions, drawn over the video by the app.
+  app.get(
+    '/api/shorts/:id/captions',
+    ah(async (req, res) => res.json(await store.shortCaptions(req.params.id, {})))
   );
 
   app.get(

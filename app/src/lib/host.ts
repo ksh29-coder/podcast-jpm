@@ -1,5 +1,5 @@
 import { getItem, setItem } from './storage';
-import { request, type Chapter, type Clip, type Episode, type Mention, type Stats } from './api';
+import { request, type Captions, type Chapter, type Clip, type Cue, type Episode, type Mention, type Stats } from './api';
 
 // What the AI suggested for an episode, waiting for a host to apply it.
 export type AiSuggestions = {
@@ -139,6 +139,8 @@ export function hostApi(passcode: string) {
       body: Partial<{ title: string; description: string; focusX: number; tags: string[]; coverSec: number; status: Status; publishAt: string; reviewNote: string | null }>
     ) =>
       call<HostShort>('PATCH', `/shorts/${id}`, body),
+    shortCaptions: (id: string) => call<Captions>('GET', `/shorts/${id}/captions`),
+    saveShortCaptions: (id: string, cues: Cue[]) => call<Captions>('PUT', `/shorts/${id}/captions`, { cues }),
     reach: (id: string) => call<Reach>('GET', `/episodes/${id}/reach`),
     comments: () => call<HostComment[]>('GET', '/comments'),
     setCommentStatus: (id: string, status: 'approved' | 'rejected') => call<void>('PATCH', `/comments/${id}`, { status }),
