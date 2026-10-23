@@ -1,12 +1,14 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
+import { CaptionsEditor } from '../../../components/engage/CaptionsEditor';
 import { AiCheckLine } from '../../../components/host/AiCheckLine';
 import { ReportsLine } from '../../../components/host/cards';
 import { useHost } from '../../../components/host/HostGate';
 import { ui } from '../../../components/host/ui';
 import { TagsField } from '../../../components/post/TagsField';
 import { ShortVideo } from '../../../components/ShortVideo';
+import type { Cue } from '../../../lib/api';
 import { formatWhen, videoLabel, type HostEpisode, type HostShort } from '../../../lib/host';
 import { colors, radius, spacing } from '../../../theme';
 
@@ -40,6 +42,9 @@ export default function ReviewShort() {
       (e) => setError(e instanceof Error ? e.message : String(e))
     );
   }, [api, id, isEpisode]);
+
+  const loadCaptions = useCallback(() => api.shortCaptions(id), [api, id]);
+  const saveCaptions = useCallback((cues: Cue[]) => api.saveShortCaptions(id, cues), [api, id]);
 
   if (!short) return error ? <Text style={[ui.error, { padding: spacing.xl }]}>{error}</Text> : <ActivityIndicator style={{ flex: 1 }} color={colors.text} />;
 
@@ -80,6 +85,7 @@ export default function ReviewShort() {
       <TextInput style={[ui.input, ui.multiline]} value={description} onChangeText={setDescription} maxLength={1000} multiline accessibilityLabel="Description" />
       <Text style={ui.label}>Tags</Text>
       <TagsField tags={tags} onChange={setTags} />
+      {!isEpisode && <CaptionsEditor load={loadCaptions} save={saveCaptions} hints={() => ({ title, description, tags })} waiting={!!processing} />}
 
       {error && <Text style={ui.error}>{error}</Text>}
       {rejecting ? (

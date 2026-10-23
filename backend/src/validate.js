@@ -27,4 +27,18 @@ function tags(value) {
   return clean;
 }
 
-module.exports = { str, num, tags };
+// Caption lines from an editor: [{ startSec, endSec, text }], in the video's
+// time. Lines left empty are dropped.
+function cues(value) {
+  if (!Array.isArray(value) || value.length > 500) throw httpError(400, 'cues must be a list of up to 500 lines');
+  return value
+    .map((c, i) => {
+      const startSec = num(c?.startSec, `line ${i + 1} start`, { required: true, min: 0, max: 4 * 3600 });
+      const endSec = num(c?.endSec, `line ${i + 1} end`, { required: true, min: startSec, max: 4 * 3600 });
+      const text = (str(c?.text ?? '', `line ${i + 1}`, { max: 300 }) || '').replace(/\s+/g, ' ');
+      return { startSec, endSec, text };
+    })
+    .filter((c) => c.text);
+}
+
+module.exports = { str, num, tags, cues };

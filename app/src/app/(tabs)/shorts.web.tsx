@@ -6,6 +6,7 @@ import { Icon, type IconName } from '../../components/Icon';
 import { Scrubber } from '../../components/Scrubber';
 import { ShortVideo, type ShortVideoHandle } from '../../components/ShortVideo';
 import { shareItem } from '../../components/engage/share';
+import { CcButton, ShortCaptions } from '../../components/engage/Captions';
 import { ShortInfo } from '../../components/engage/ShortInfo';
 import { PostMenu } from '../../components/engage/PostMenu';
 import { useLike } from '../../components/engage/useLike';
@@ -112,8 +113,12 @@ function ShortStage({ short, index, total, box, narrow }: { short: Short; index:
           )}
         </Pressable>
         <View pointerEvents="box-none" style={[styles.overlay, narrow && { paddingRight: 76 }]}>
+          <ShortCaptions id={short.id} position={time.position} />
           <ShortInfo short={short} />
           {time.duration > 0 && <Scrubber variant="overlay" position={time.position} duration={time.duration} onSeek={(sec) => video.current?.seekTo(sec)} />}
+        </View>
+        <View style={styles.cc}>
+          <CcButton />
         </View>
         <Text style={styles.counter}>
           {index + 1} / {total}
@@ -184,6 +189,7 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     experimental_backgroundImage: 'linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.75) 45%)',
   },
+  cc: { position: 'absolute', top: spacing.md - 2, left: spacing.md },
   counter: { position: 'absolute', top: spacing.md, right: spacing.md, ...type.caption, color: 'rgba(255,255,255,0.85)', fontVariant: ['tabular-nums'] },
   actions: { gap: spacing.lg, paddingBottom: spacing.lg },
   actionsNarrow: { position: 'absolute', right: spacing.md, bottom: 140, gap: spacing.md },

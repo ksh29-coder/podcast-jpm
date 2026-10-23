@@ -1,7 +1,7 @@
 const crypto = require('crypto');
 const { tintFromUrl } = require('./tint');
 const { parseVtt } = require('./vtt');
-const { cleanInsights, cleanSuggestions } = require('./ai');
+const { cleanInsights, cleanSuggestions, cleanCaptionFix } = require('./ai');
 const { cuesToVtt } = require('./transcribe');
 
 // Database access and the JSON shapes the app sees. Media is either a static
@@ -440,6 +440,62 @@ function createStore({ db, video, ai, transcriber, tint = tintFromUrl, cleanUpEv
     return rows[0];
   }
 
+  const cuesOf = async (videoId) =>
+    (await db.query('select start_sec, end_sec, text from transcript_cues where video_id = $1 order by idx', [videoId])).rows.map((c) => ({
+      startSec: c.start_sec,
+      endSec: c.end_sec,
+      text: c.text,
+    }));
+
+  // A Short's captions: its own video's lines (generated, or fixed by a
+  // person), else the episode's lines for the part it was cut from. Asks the
+  // video service to make captions when there are none yet.
+  async function captionsOf(s) {
+    const v = s.video_id && (await db.query('select * from videos where id = $1', [s.video_id])).rows[0];
+    if (v?.transcript_status === 'ready') return { status: 'ready', source: v.transcript_source, cues: await cuesOf(v.id) };
+    if (s.episode_id && s.start_sec != null && s.end_sec != null) {
+      const { rows } = await db.query(
+        `select c.start_sec, c.end_sec, c.text from transcript_cues c join episodes e on e.video_id = c.video_id
+         where e.id = $1 and c.end_sec > $2 and c.start_sec < $3 order by c.idx`,
+        [s.episode_id, s.start_sec, s.end_sec]
+      );
+      const len = s.end_sec - s.start_sec;
+      const at = (sec) => Math.round(Math.min(len, Math.max(0, sec - s.start_sec)) * 100) / 100;
+      if (rows.length) return { status: 'ready', source: 'episode', cues: rows.map((c) => ({ startSec: at(c.start_sec), endSec: at(c.end_sec), text: c.text })) };
+    }
+    if (!v) return { status: 'unavailable', source: null, cues: [] };
+    const status = await ensureTranscript(v);
+    return status === 'ready' ? { status, source: v.transcript_source, cues: await cuesOf(v.id) } : { status, source: null, cues: [] };
+  }
+
+  // Lines a person checked replace the generated ones for good.
+  async function saveCaptions(videoId, cues) {
+    await db.query('delete from transcript_cues where video_id = $1', [videoId]);
+    for (let i = 0; i < cues.length; i++) {
+      await db.query('insert into transcript_cues (video_id, idx, start_sec, end_sec, text) values ($1, $2, $3, $4, $5)', [
+        videoId,
+        i,
+        cues[i].startSec,
+        cues[i].endSec,
+        cues[i].text,
+      ]);
+    }
+    await db.query("update videos set transcript_status = 'ready', transcript_source = 'edited' where id = $1", [videoId]);
+  }
+
+  async function findShort(id, { host = false, userId } = {}) {
+    const { rows } = await db.query(`select s.*, ${live('s')} as live from shorts s where s.id = $1`, [id]);
+    const s = rows[0];
+    if (!s || !(host || s.live || (userId && s.author_id === userId))) throw httpError(404, 'Short not found');
+    return s;
+  }
+
+  async function ownUpload(userId, videoId) {
+    const { rows } = await db.query('select * from videos where id = $1', [videoId]);
+    if (!rows[0] || rows[0].owner_id !== userId || rows[0].wants_audio) throw httpError(404, 'Upload not found');
+    return rows[0];
+  }
+
   // Visible to listeners: published, and the release time (if scheduled) has come.
   const live = (alias) => `${alias}.status = 'published' and ${alias}.published_at <= now()`;
 
@@ -850,6 +906,44 @@ function createStore({ db, video, ai, transcriber, tint = tintFromUrl, cleanUpEv
     async deleteMyShort(userId, id) {
       await ownShort(userId, id);
       await removeShort(id);
+    },
+
+    // ---- Captions on Shorts ----
+
+    // who: {} for a viewer (live Shorts only), { userId } adds their own, { host: true } any.
+    async shortCaptions(id, who) {
+      return captionsOf(await findShort(id, who));
+    },
+
+    // Uploaders can fix their captions while the Short waits for review; hosts any time.
+    async setShortCaptions(id, cues, who) {
+      const s = await findShort(id, who);
+      if (!who.host && (s.author_id !== who.userId || s.status !== 'in_review')) throw httpError(409, 'Only Shorts still in review can be edited');
+      if (!s.video_id) throw httpError(409, 'This Short’s captions come from its episode’s transcript');
+      await saveCaptions(s.video_id, cues);
+      return captionsOf(s);
+    },
+
+    // Captions of an upload not posted yet, so they can be checked before posting.
+    async uploadCaptions(userId, videoId) {
+      return captionsOf({ video_id: (await ownUpload(userId, videoId)).id });
+    },
+
+    async setUploadCaptions(userId, videoId, cues) {
+      const v = await ownUpload(userId, videoId);
+      const { rows } = await db.query('select id from shorts where video_id = $1', [videoId]);
+      if (rows[0]) return this.setShortCaptions(rows[0].id, cues, { userId });
+      await saveCaptions(v.id, cues);
+      return captionsOf({ video_id: v.id });
+    },
+
+    // The AI's fixes for caption lines, for the person to accept or not (nothing is saved).
+    async tidyCaptions({ cues, title, description, tags }) {
+      if (!ai?.fixCaptions) throw httpError(503, 'AI isn’t set up on this server');
+      if (!cues.length) return { cues };
+      const lines = cues.map((c) => c.text);
+      const fixed = cleanCaptionFix(await ai.fixCaptions({ title, description, tags, lines }), lines);
+      return { cues: cues.map((c, i) => ({ ...c, text: fixed[i] })) };
     },
   };
 

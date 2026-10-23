@@ -2,7 +2,7 @@ const crypto = require('crypto');
 const express = require('express');
 const { STATUSES } = require('./db');
 const { httpError, MAX_SHORT_SEC } = require('./store');
-const { num, str, tags } = require('./validate');
+const { cues, num, str, tags } = require('./validate');
 
 // Host mode: uploading and publishing episodes and Shorts.
 //
@@ -284,6 +284,9 @@ function hostRouter({ store, engagement, baseUrl, passcode, db }) {
       res.json(all.find((s) => s.id === req.params.id));
     })
   );
+
+  r.get('/shorts/:id/captions', ah(async (req, res) => res.json(await store.shortCaptions(req.params.id, { host: true }))));
+  r.put('/shorts/:id/captions', ah(async (req, res) => res.json(await store.setShortCaptions(req.params.id, cues(req.body?.cues), { host: true }))));
 
   r.get('/limits', (req, res) => res.json({ maxShortSec: MAX_SHORT_SEC }));
 

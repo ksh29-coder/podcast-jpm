@@ -83,6 +83,26 @@ Return JSON with exactly these keys:
 - "concerns": things a reviewer should check before it's shown to everyone: possible confidential or client information (client or project names, account numbers, internal hostnames, credentials, personal data), content not about software or AI, or offensive language. Each is one short sentence starting with its time, e.g. "0:12 names a client". [] when there's nothing.`,
       });
     },
+
+    // Fixes speech-to-text mistakes in a Short's captions (misheard names and
+    // terms, missing punctuation), one reply line per caption line.
+    async fixCaptions({ title, description, tags, lines }) {
+      return ask({
+        maxTokens: 4000,
+        system:
+          'You correct automatic captions for short videos about AI and software engineering in an internal app. ' +
+          'Fix misheard words, names and technical terms, spelling, capitalisation and punctuation. Never add, remove or reword what was said beyond that. ' +
+          'Reply with one JSON object and nothing else.',
+        user: `Title: ${title || '(none)'}
+Description: ${description || '(none)'}
+Tags: ${(tags || []).join(', ') || '(none)'}
+
+Caption lines, numbered:
+${lines.map((l, i) => `${i + 1}. ${l}`).join('\n')}
+
+Return JSON {"lines": [...]} with exactly ${lines.length} strings: line 1 corrected, line 2 corrected, and so on. Keep a line as it is when it's already right.`,
+      });
+    },
   };
 }
 
@@ -158,4 +178,15 @@ function cleanSuggestions(raw, { durationSec }) {
   };
 }
 
-module.exports = { openRouterAi, cleanInsights, cleanSuggestions };
+// The AI's corrected caption lines, kept only when there's one per line;
+// a line it emptied or made far longer keeps what was said.
+function cleanCaptionFix(raw, lines) {
+  const out = raw?.lines;
+  if (!Array.isArray(out) || out.length !== lines.length) throw Object.assign(new Error('The AI couldn’t tidy these captions. Try again.'), { status: 502 });
+  return out.map((l, i) => {
+    const text = typeof l === 'string' ? l.replace(/\s+/g, ' ').trim() : '';
+    return text && text.length <= Math.max(300, lines[i].length * 2) ? text.slice(0, 300) : lines[i];
+  });
+}
+
+module.exports = { openRouterAi, cleanInsights, cleanSuggestions, cleanCaptionFix };

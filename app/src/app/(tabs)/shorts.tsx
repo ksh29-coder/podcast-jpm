@@ -8,6 +8,7 @@ import { Icon, type IconName } from '../../components/Icon';
 import { ShortVideo, type ShortVideoHandle } from '../../components/ShortVideo';
 import { Scrubber } from '../../components/Scrubber';
 import { shareItem } from '../../components/engage/share';
+import { CcButton, ShortCaptions } from '../../components/engage/Captions';
 import { ShortInfo } from '../../components/engage/ShortInfo';
 import { PostMenu } from '../../components/engage/PostMenu';
 import { useLike } from '../../components/engage/useLike';
@@ -130,6 +131,9 @@ function ShortItem({ short, height, active, index, total }: { short: Short; heig
           </View>
         )}
       </Pressable>
+      <View style={[styles.cc, { top: insets.top + spacing.md - 2 }]}>
+        <CcButton />
+      </View>
       <Text style={[styles.counter, { top: insets.top + spacing.md }]}>
         {index + 1} / {total}
       </Text>
@@ -147,6 +151,7 @@ function ShortItem({ short, height, active, index, total }: { short: Short; heig
       </View>
       <PostMenu visible={menu} onClose={() => setMenu(false)} itemType="short" id={short.id} author={short.author} />
       <View style={[styles.overlay, { bottom: chrome + 44 }]} pointerEvents="box-none">
+        <ShortCaptions id={short.id} position={time.position} />
         <ShortInfo short={short} />
       </View>
       {time.duration > 0 && (
@@ -178,6 +183,7 @@ function parseAspect(ratio: string | null) {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#000' },
   pausedIcon: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  cc: { position: 'absolute', left: spacing.lg },
   counter: { position: 'absolute', right: spacing.lg, ...type.caption, color: 'rgba(255,255,255,0.8)', fontVariant: ['tabular-nums'] },
   // Leaves room on the right for the like/comment/share column.
   overlay: { position: 'absolute', left: spacing.lg, right: 76, gap: spacing.sm },

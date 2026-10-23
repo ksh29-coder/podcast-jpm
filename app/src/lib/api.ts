@@ -133,6 +133,11 @@ export type Transcript = {
   source?: string | null;
 };
 
+// A Short's caption lines, in the Short's own time. source: 'edited' once a
+// person fixed them, 'episode' when taken from the episode it was cut from.
+export type Captions = { status: Transcript['status']; source: string | null; cues: Cue[] };
+export type CaptionHints = { title?: string; description?: string; tags?: string[] };
+
 // A transcript line that matched a search, linked to the moment it's said.
 export type Moment = { episodeId: string; episodeTitle: string; startSec: number; text: string };
 export type SearchResults = { episodes: Episode[]; shorts: Short[]; moments: Moment[] };
@@ -170,6 +175,7 @@ export const api = {
   shorts: () => request<Short[]>('/api/shorts'),
   transcript: (episodeId: string) => request<Transcript>(`/api/episodes/${episodeId}/transcript`),
   search: (q: string) => request<SearchResults>(`/api/search?q=${encodeURIComponent(q)}`),
+  shortCaptions: (id: string) => request<Captions>(`/api/shorts/${id}/captions`),
   progress: () => request<Progress>('/api/progress'),
   setLiked: (type: ItemType, id: string, liked: boolean) =>
     request<Stats>(`/api/items/${type}/${id}/like`, { method: liked ? 'PUT' : 'DELETE' }),
@@ -194,6 +200,15 @@ export const api = {
     request<MyShort>('/api/me/shorts', { method: 'POST', body: JSON.stringify({ videoId, ...details }) }),
   updateMyShort: (id: string, details: Partial<ShortDetails>) => request<MyShort>(`/api/me/shorts/${id}`, { method: 'PATCH', body: JSON.stringify(details) }),
   deleteMyShort: (id: string) => request<void>(`/api/me/shorts/${id}`, { method: 'DELETE' }),
+  // Captions to check before posting (by upload), or while in review (by Short).
+  uploadCaptions: (videoId: string) => request<Captions>(`/api/me/uploads/${videoId}/captions`),
+  saveUploadCaptions: (videoId: string, cues: Cue[]) =>
+    request<Captions>(`/api/me/uploads/${videoId}/captions`, { method: 'PUT', body: JSON.stringify({ cues }) }),
+  myShortCaptions: (id: string) => request<Captions>(`/api/me/shorts/${id}/captions`),
+  saveMyShortCaptions: (id: string, cues: Cue[]) => request<Captions>(`/api/me/shorts/${id}/captions`, { method: 'PUT', body: JSON.stringify({ cues }) }),
+  // The AI's fixes for misheard words; nothing is saved.
+  tidyCaptions: (cues: Cue[], hints: CaptionHints) =>
+    request<{ cues: Cue[] }>('/api/me/captions/tidy', { method: 'POST', body: JSON.stringify({ cues, ...hints }) }),
   myEpisodes: () => request<MyEpisode[]>('/api/me/episodes'),
   postEpisode: (videoId: string, details: ShortDetails) =>
     request<MyEpisode>('/api/me/episodes', { method: 'POST', body: JSON.stringify({ videoId, ...details }) }),

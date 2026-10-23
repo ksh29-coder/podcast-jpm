@@ -1,6 +1,6 @@
 const express = require('express');
 const { httpError } = require('./store');
-const { num, str, tags } = require('./validate');
+const { cues, num, str, tags } = require('./validate');
 
 // Posting Shorts (phone or website) and episodes (website), open to
 // everyone: a name and the guidelines first, then upload (a Short can keep
@@ -97,6 +97,36 @@ function meRouter({ store, engagement, baseUrl }) {
     ah(async (req, res) => {
       await store.deleteMyShort(req.user.id, req.params.id);
       res.status(204).end();
+    })
+  );
+
+  // Captions: checked and fixed before posting (by upload) or while in review (by Short).
+  r.get('/uploads/:videoId/captions', ah(async (req, res) => res.json(await store.uploadCaptions(req.user.id, req.params.videoId))));
+  r.put(
+    '/uploads/:videoId/captions',
+    ah(async (req, res) => res.json(await store.setUploadCaptions(req.user.id, req.params.videoId, cues(req.body?.cues))))
+  );
+  r.get('/shorts/:id/captions', ah(async (req, res) => res.json(await store.shortCaptions(req.params.id, { userId: req.user.id }))));
+  r.put(
+    '/shorts/:id/captions',
+    ah(async (req, res) => res.json(await store.setShortCaptions(req.params.id, cues(req.body?.cues), { userId: req.user.id })))
+  );
+
+  // The AI's fixes for misheard words, for whoever is editing captions (hosts too).
+  r.post(
+    '/captions/tidy',
+    ah(async (req, res) => {
+      const b = req.body || {};
+      const lines = cues(b.cues);
+      if (lines.length > 300) throw httpError(400, 'Too many lines to tidy at once');
+      res.json(
+        await store.tidyCaptions({
+          cues: lines,
+          title: str(b.title, 'title', { max: 200 }),
+          description: str(b.description, 'description', { max: 1000 }),
+          tags: tags(b.tags),
+        })
+      );
     })
   );
 
