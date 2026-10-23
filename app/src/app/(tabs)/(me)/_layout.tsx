@@ -7,6 +7,7 @@ export default function MeLayout() {
       <Stack.Screen name="me" options={{ title: 'Me', ...tabRootOptions }} />
       <Stack.Screen name="downloads" options={{ title: 'Downloads' }} />
       <Stack.Screen name="my-short/[id]" options={{ title: 'Edit Short', headerLargeTitle: false }} />
+      <Stack.Screen name="my-short/pictures/[id]" options={{ title: 'Pictures', headerLargeTitle: false }} />
     </Stack>
   );
 }

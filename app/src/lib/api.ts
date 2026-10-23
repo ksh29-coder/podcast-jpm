@@ -87,18 +87,46 @@ export type UploadState = {
 export type ShortStatus = 'draft' | 'in_review' | 'published' | 'rejected';
 export type PostKind = 'short' | 'episode';
 
+// Pictures being drawn into a Short's video: queued and rendering while
+// that happens, ready once they're in it.
+export type EditStatus = 'none' | 'queued' | 'rendering' | 'ready' | 'failed';
+
 // One of this person's own Shorts, with where it is in review.
 export type MyShort = Short & {
   status: ShortStatus;
   // Why a host didn't approve it, if they said.
   reviewNote: string | null;
   coverSec: number | null;
-  video: { id: string; status: 'uploading' | 'processing' | 'ready' | 'errored'; error: string | null } | null;
+  pictureCount: number;
+  video: {
+    id: string;
+    status: 'uploading' | 'processing' | 'ready' | 'errored';
+    error: string | null;
+    edit?: { status: EditStatus; error: string | null };
+  } | null;
   createdAt: string;
   publishedAt: string | null;
 };
 
-export type ShortDetails = { title: string; description: string; tags: string[]; coverSec?: number };
+// A picture someone added (checked and made a sensible size by the server).
+export type PictureFile = { id: string; url: string; width: number; height: number };
+// Where and when a picture shows, in the Short's own time. 'overlay': on top,
+// its top-left corner at x, y and w wide, as fractions of the video's size.
+// 'full': filling the video. The video's sound carries on either way.
+export type PicturePlacement = { pictureId: string; kind: 'overlay' | 'full'; startSec: number; endSec: number; x?: number; y?: number; w?: number };
+export type PlacedPicture = PicturePlacement & { picture: PictureFile };
+// A Short's pictures for its uploader's editor, with the video to place them
+// on (without pictures; null once they can't change).
+export type ShortPictures = {
+  videoUrl: string | null;
+  durationSec: number | null;
+  aspectRatio: string | null;
+  editable: boolean;
+  edit: { status: EditStatus; error: string | null };
+  pictures: PlacedPicture[];
+};
+
+export type ShortDetails = { title: string; description: string; tags: string[]; coverSec?: number; pictures?: PicturePlacement[] };
 
 // One of this person's own episodes (posted from the website).
 export type MyEpisode = Episode & {
@@ -206,6 +234,18 @@ export const api = {
     request<Captions>(`/api/me/uploads/${videoId}/captions`, { method: 'PUT', body: JSON.stringify({ cues }) }),
   myShortCaptions: (id: string) => request<Captions>(`/api/me/shorts/${id}/captions`),
   saveMyShortCaptions: (id: string, cues: Cue[]) => request<Captions>(`/api/me/shorts/${id}/captions`, { method: 'PUT', body: JSON.stringify({ cues }) }),
+  // A picture for a Short: made, sent in pieces (offset: bytes sent before), then checked.
+  createPicture: () => request<{ id: string }>('/api/me/pictures', { method: 'POST' }),
+  addPictureData: (id: string, offset: number, bytes: Uint8Array) =>
+    request<{ received: number }>(`/api/me/pictures/${id}?offset=${offset}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: bytes as BodyInit,
+    }),
+  finishPicture: (id: string) => request<PictureFile>(`/api/me/pictures/${id}/done`, { method: 'POST' }),
+  myShortPictures: (id: string) => request<ShortPictures>(`/api/me/shorts/${id}/pictures`),
+  saveMyShortPictures: (id: string, pictures: PicturePlacement[]) =>
+    request<ShortPictures>(`/api/me/shorts/${id}/pictures`, { method: 'PUT', body: JSON.stringify({ pictures }) }),
   // The AI's fixes for misheard words; nothing is saved.
   tidyCaptions: (cues: Cue[], hints: CaptionHints) =>
     request<{ cues: Cue[] }>('/api/me/captions/tidy', { method: 'POST', body: JSON.stringify({ cues, ...hints }) }),

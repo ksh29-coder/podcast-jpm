@@ -11,15 +11,16 @@ const { assistantRouter } = require('./assistant');
 const { openAiVoice } = require('./voice');
 const { createStore } = require('./store');
 const { muxVideo } = require('./video');
+const { ffmpegEditor } = require('./edit');
 
 const MEDIA_DIR = path.join(__dirname, '..', 'public', 'media');
 
 // Express 4 doesn't catch rejected promises from handlers.
 const ah = (fn) => (req, res, next) => fn(req, res, next).catch(next);
 
-function createApp({ db = connect(), video = muxVideo(), ai = openRouterAi(), transcriber = openRouterTranscriber(), voice = openAiVoice(), tint, mediaDir = MEDIA_DIR, auth = authMiddleware(), hostPasscode, cleanUpEveryMs } = {}) {
+function createApp({ db = connect(), video = muxVideo(), ai = openRouterAi(), transcriber = openRouterTranscriber(), voice = openAiVoice(), editor = ffmpegEditor(), background, tint, mediaDir = MEDIA_DIR, auth = authMiddleware(), hostPasscode, cleanUpEveryMs } = {}) {
   const app = express();
-  const store = createStore({ db, video, ai, transcriber, ...(tint && { tint }), ...(cleanUpEveryMs !== undefined && { cleanUpEveryMs }) });
+  const store = createStore({ db, video, ai, transcriber, editor, ...(background && { background }), ...(tint && { tint }), ...(cleanUpEveryMs !== undefined && { cleanUpEveryMs }) });
   const engagement = createEngagement({ db });
 
   // Tables are created (and seeded) on first use, so a fresh database needs no
@@ -103,6 +104,17 @@ function createApp({ db = connect(), video = muxVideo(), ai = openRouterAi(), tr
       const vtt = m && (await store.captionsVtt(m[1]));
       if (!vtt) return res.status(404).json({ error: 'No captions' });
       res.type('text/vtt').send(vtt);
+    })
+  );
+
+  // A picture someone added to their Short, for their editor. Ids are
+  // unguessable and a picture never changes.
+  app.get(
+    '/api/pictures/:id',
+    ah(async (req, res) => {
+      const pic = await store.pictureFile(req.params.id);
+      if (!pic) return res.status(404).json({ error: 'Picture not found' });
+      res.set('Cache-Control', 'private, max-age=86400, immutable').type(pic.mime).send(pic.data);
     })
   );
 

@@ -61,6 +61,8 @@ const ICONS = {
   more: { sf: 'ellipsis', ion: 'ellipsis-horizontal' },
   flag: { sf: 'flag', ion: 'flag-outline' },
   eyeSlash: { sf: 'eye.slash', ion: 'eye-off-outline' },
+  photo: { sf: 'photo', ion: 'image-outline' },
+  expand: { sf: 'arrow.up.left.and.arrow.down.right', ion: 'expand-outline' },
 } as const satisfies Record<string, { sf: SFSymbol; ion: keyof typeof Ionicons.glyphMap }>;
 
 export type IconName = keyof typeof ICONS;

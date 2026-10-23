@@ -12,6 +12,7 @@
     "media": "./scripts/generate-sample-media.sh"
   },
   "dependencies": {
+    "@vercel/functions": "^3.1.4",
     "express": "^4.22.3",
     "ffmpeg-static": "^5.3.0",
     "jpeg-js": "^0.4.4",

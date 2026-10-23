@@ -3,6 +3,7 @@ const { tintFromUrl } = require('./tint');
 const { parseVtt } = require('./vtt');
 const { cleanInsights, cleanSuggestions, cleanCaptionFix } = require('./ai');
 const { cuesToVtt } = require('./transcribe');
+const { inBackground } = require('./background');
 
 // Database access and the JSON shapes the app sees. Media is either a static
 // file under /media (the seeded episodes) or a video on the video service.
@@ -11,6 +12,11 @@ const MAX_SHORT_SEC = 90;
 // Rejected Shorts and uploads nobody posted are deleted (with their videos)
 // after this long, to keep video storage free.
 const KEEP_DAYS = 7;
+// Largest picture file someone can add to a Short (it's made smaller).
+const MAX_PICTURE_BYTES = 25 << 20;
+
+// Pictures are being (or waiting to be) added to the video.
+const editBusy = (status) => status === 'queued' || status === 'rendering';
 
 const newId = (prefix) => `${prefix}_${crypto.randomBytes(6).toString('hex')}`;
 
@@ -38,6 +44,7 @@ const EPISODE_SELECT = `
 const SHORT_SELECT = `
   select s.*, v.playback_id, v.status as video_status, v.duration_sec as video_duration_sec,
          v.aspect_ratio, v.error as video_error, v.suggest_status, v.suggestions,
+         v.edit_status, v.edit_error, jsonb_array_length(v.pictures) as picture_count,
          e.title as episode_title, e.artwork_url as episode_artwork_url,
          ev.playback_id as episode_playback_id, e.thumbnail_sec as episode_thumbnail_sec,
          p.name as author_name, ${reportsOf('short', 's')}
@@ -47,7 +54,7 @@ const SHORT_SELECT = `
   left join episodes e on e.id = s.episode_id
   left join videos ev on ev.id = e.video_id`;
 
-function createStore({ db, video, ai, transcriber, tint = tintFromUrl, cleanUpEveryMs = 10 * 60_000 }) {
+function createStore({ db, video, ai, transcriber, editor, background = inBackground, tint = tintFromUrl, cleanUpEveryMs = 10 * 60_000 }) {
   function episodeArtwork(row, baseUrl) {
     return row.playback_id ? video.thumbnailUrl(row.playback_id, row.thumbnail_sec) : absolutize(row.artwork_url, baseUrl);
   }
@@ -112,6 +119,8 @@ function createStore({ db, video, ai, transcriber, tint = tintFromUrl, cleanUpEv
             error: row.video_error,
             ...(row.audio_ready !== undefined && { audioReady: row.audio_ready, hasAudio: row.has_audio }),
             ...(row.transcript_status !== undefined && { transcriptStatus: row.transcript_status, transcriptSource: row.transcript_source }),
+            // Pictures being added to a Short's video (see advanceEdit).
+            ...(row.edit_status !== undefined && { edit: { status: row.edit_status, error: row.edit_error } }),
           }
         : null,
       createdAt: new Date(row.created_at).toISOString(),
@@ -126,6 +135,7 @@ function createStore({ db, video, ai, transcriber, tint = tintFromUrl, cleanUpEv
     return {
       ...withHostFields(toShort(row, baseUrl), row),
       coverSec: row.cover_sec ?? null,
+      pictureCount: row.picture_count || 0,
       reviewNote: row.review_note || null,
       reports: parseReports(row.reports),
       aiCheck: row.author_id ? { status: row.suggest_status || 'none', concerns: row.suggestions?.concerns || [] } : null,
@@ -246,7 +256,131 @@ function createStore({ db, video, ai, transcriber, tint = tintFromUrl, cleanUpEv
     );
     // One slow or failing check shouldn't hide the rest.
     await Promise.all(rows.map((r) => syncVideo(r).catch((e) => console.warn('video sync', r.id, e.message))));
+    for (const r of rows) if (editBusy(r.edit_status)) background(advanceEdit(r.id));
   }
+
+  // ---- Pictures in a Short's video ----
+
+  // Videos this server is adding pictures to (or waiting to), so checks every
+  // few seconds don't start another.
+  const editing = new Set();
+
+  // Makes the video again with its pictures, once it's processed (and
+  // trimmed): ffmpeg adds them to a copy of the video without pictures, which
+  // replaces the one shown. Claimed in the database so only one runs; one
+  // cut off by the server's time limit is tried again after a few minutes.
+  async function advanceEdit(videoId) {
+    if (editing.has(videoId)) return;
+    editing.add(videoId);
+    try {
+      await makeEdit(videoId);
+    } finally {
+      editing.delete(videoId);
+    }
+  }
+
+  async function makeEdit(videoId) {
+    const claimable = `(edit_status = 'queued' or (edit_status = 'rendering' and edit_started_at < now() - interval '6 minutes'))
+      and status = 'ready' and trim_start is null and source_asset_id is null`;
+    const { rows } = await db.query(`select * from videos where id = $1 and ${claimable}`, [videoId]);
+    const v = rows[0];
+    if (!v) return;
+    if (!v.pictures.length) {
+      // All taken out again: back to the video without them.
+      await db.query(
+        `update videos set asset_id = unedited_asset_id, playback_id = unedited_playback_id, source_asset_id = asset_id,
+           status = 'processing', unedited_asset_id = null, unedited_playback_id = null
+         where id = $1 and unedited_asset_id is not null`,
+        [videoId]
+      );
+      await db.query("update videos set edit_status = 'none', edit_error = null where id = $1 and edit_status = $2", [videoId, v.edit_status]);
+      return;
+    }
+    const fail = (message) => db.query("update videos set edit_status = 'failed', edit_error = $2 where id = $1", [videoId, message]);
+    if (!editor) return fail('Adding pictures isn’t set up on this server');
+    // The video service may take a minute to make the file downloadable.
+    let url = null;
+    for (let i = 0; i < 12 && !url; i++) {
+      url = await video.downloadUrl(v.unedited_asset_id || v.asset_id);
+      if (!url) await new Promise((r) => setTimeout(r, 5000));
+    }
+    if (!url) return;
+    const { rows: claimed } = await db.query(
+      `update videos set edit_status = 'rendering', edit_started_at = now(), edit_error = null where id = $1 and ${claimable} returning *`,
+      [videoId]
+    );
+    const job = claimed[0];
+    if (!job) return;
+    try {
+      const ids = job.pictures.map((p) => p.pictureId);
+      const { rows: files } = await db.query("select id, data, mime, width, height from pictures where id = any($1) and status = 'ready'", [ids]);
+      const byId = new Map(files.map((f) => [f.id, f]));
+      if (ids.some((id) => !byId.has(id))) throw httpError(409, 'A picture is missing. Add it again.');
+      await editor.render({ videoUrl: url, pictures: job.pictures.map((p) => ({ ...p, ...byId.get(p.pictureId) })) }, async (file) => {
+        const { uploadId, uploadUrl } = await video.createUpload({ captions: job.transcript_status !== 'ready' });
+        await video.uploadFile(uploadUrl, file);
+        // The new video shows once it's processed. The one without pictures
+        // is kept; an earlier one with pictures is deleted then (source_asset_id).
+        await db.query(
+          `update videos set upload_id = $2, asset_id = null, playback_id = null, status = 'processing',
+             unedited_asset_id = coalesce(unedited_asset_id, asset_id), unedited_playback_id = coalesce(unedited_playback_id, playback_id),
+             source_asset_id = case when unedited_asset_id is null then null else asset_id end,
+             edit_status = 'ready'
+           where id = $1`,
+          [videoId, uploadId]
+        );
+      });
+    } catch (e) {
+      console.warn('edit', videoId, e.message);
+      await fail(e.expose ? e.message : 'The pictures couldn’t be added to the video. Try again.');
+    }
+  }
+
+  // Order-proof copy of a picture list, to tell whether it changed.
+  const sameList = (a, b) => {
+    const key = (l) => JSON.stringify(l.map((p) => [p.pictureId, p.kind, p.startSec, p.endSec, p.x, p.y, p.w]));
+    return key(a) === key(b);
+  };
+
+  // Whether these pictures can go on this video (they're the uploader's, and
+  // within the video); throws a readable reason if not.
+  async function checkPictures(v, list) {
+    if (v.edit_status === 'rendering') throw httpError(409, 'Your last change is still being added to the video. Try again in a minute.');
+    // Once live, the video without pictures is gone, so they stay as they are.
+    if (v.pictures.length && v.edit_status === 'ready' && !v.unedited_asset_id) throw httpError(409, 'Pictures can’t be changed once the Short has gone live');
+    const ids = [...new Set(list.map((p) => p.pictureId))];
+    const { rows } = await db.query("select id from pictures where id = any($1) and owner_id = $2 and status = 'ready'", [ids, v.owner_id]);
+    if (rows.length !== ids.length) throw httpError(400, 'One of the pictures wasn’t found. Add it again.');
+    const length = v.trim_start != null ? v.trim_end - v.trim_start : v.duration_sec;
+    if (length && list.some((p) => p.startSec >= length)) throw httpError(400, 'A picture starts after the end of the video');
+  }
+
+  // Saves a video's pictures and starts making it again with them.
+  async function setPictures(v, list) {
+    await checkPictures(v, list);
+    if (sameList(list, v.pictures) && v.edit_status !== 'failed') return;
+    const status = list.length || v.unedited_asset_id ? 'queued' : 'none';
+    await db.query('update videos set pictures = $2, edit_status = $3, edit_error = null where id = $1', [v.id, JSON.stringify(list), status]);
+    if (status === 'queued') background(advanceEdit(v.id));
+  }
+
+  // Once a Short is live its pictures are fixed: the video without them and
+  // the picture files go.
+  async function dropUnedited(videoId) {
+    const { rows } = await db.query(
+      `update videos v set unedited_asset_id = null, unedited_playback_id = null
+       from (select id, unedited_asset_id, pictures from videos where id = $1 for update) old
+       where v.id = old.id returning old.unedited_asset_id, old.pictures`,
+      [videoId]
+    );
+    const old = rows[0];
+    if (!old) return;
+    if (old.unedited_asset_id) await video.deleteAsset(old.unedited_asset_id).catch((e) => console.warn('delete unedited', old.unedited_asset_id, e.message));
+    const ids = old.pictures.map((p) => p.pictureId);
+    if (ids.length) await db.query('delete from pictures where id = any($1)', [ids]);
+  }
+
+  const pictureUrl = (id, baseUrl) => `${baseUrl}/api/pictures/${id}`;
 
   // Moves a video's transcript along: asks for captions if nobody has, and
   // stores them once they're ready. Returns the transcript status.
@@ -396,14 +530,20 @@ function createStore({ db, video, ai, transcriber, tint = tintFromUrl, cleanUpEv
     const { rows: unposted } = await db.query(
       `delete from videos v where owner_id is not null and created_at < now() - interval '${KEEP_DAYS} days'
        and not exists (select 1 from shorts s where s.video_id = v.id)
-       and not exists (select 1 from episodes e where e.video_id = v.id) returning asset_id, source_asset_id`
+       and not exists (select 1 from episodes e where e.video_id = v.id) returning asset_id, source_asset_id, unedited_asset_id`
     );
     await deleteAssets(unposted);
+    // Picture files nothing uses (never posted, or their video was deleted).
+    await db.query(
+      `delete from pictures p where p.created_at < now() - interval '1 day'
+       and not exists (select 1 from videos v where v.pictures @> jsonb_build_array(jsonb_build_object('pictureId', p.id)))`
+    );
   }
 
-  // The video service's files for deleted video rows (and any uncut original).
+  // The video service's files for deleted video rows (and any uncut original,
+  // or copy without pictures).
   async function deleteAssets(rows) {
-    const ids = rows.flatMap((r) => [r.asset_id, r.source_asset_id]).filter(Boolean);
+    const ids = rows.flatMap((r) => [r.asset_id, r.source_asset_id, r.unedited_asset_id]).filter(Boolean);
     await Promise.all(ids.map((id) => video.deleteAsset(id).catch((e) => console.warn('delete asset', id, e.message))));
   }
 
@@ -412,7 +552,7 @@ function createStore({ db, video, ai, transcriber, tint = tintFromUrl, cleanUpEv
     const { rows } = await db.query('delete from shorts where id = $1 returning video_id', [id]);
     for (const table of ['likes', 'views', 'comments', 'content_reports']) await db.query(`delete from ${table} where item_type = 'short' and item_id = $1`, [id]);
     if (rows[0]?.video_id) {
-      const { rows: vids } = await db.query('delete from videos where id = $1 returning asset_id, source_asset_id', [rows[0].video_id]);
+      const { rows: vids } = await db.query('delete from videos where id = $1 returning asset_id, source_asset_id, unedited_asset_id', [rows[0].video_id]);
       await deleteAssets(vids);
     }
   }
@@ -422,7 +562,7 @@ function createStore({ db, video, ai, transcriber, tint = tintFromUrl, cleanUpEv
     const { rows } = await db.query('delete from episodes where id = $1 returning video_id', [id]);
     for (const table of ['likes', 'views', 'comments', 'content_reports']) await db.query(`delete from ${table} where item_type = 'episode' and item_id = $1`, [id]);
     if (rows[0]?.video_id) {
-      const { rows: vids } = await db.query('delete from videos where id = $1 returning asset_id, source_asset_id', [rows[0].video_id]);
+      const { rows: vids } = await db.query('delete from videos where id = $1 returning asset_id, source_asset_id, unedited_asset_id', [rows[0].video_id]);
       await deleteAssets(vids);
     }
   }
@@ -612,7 +752,7 @@ function createStore({ db, video, ai, transcriber, tint = tintFromUrl, cleanUpEv
     async hostShorts(baseUrl) {
       await cleanUp().catch((e) => console.warn('clean up', e.message));
       let { rows } = await db.query(`${SHORT_SELECT} order by s.created_at desc`);
-      const pending = rows.filter((r) => r.video_id && !['ready', 'errored'].includes(r.video_status));
+      const pending = rows.filter((r) => r.video_id && (!['ready', 'errored'].includes(r.video_status) || editBusy(r.edit_status)));
       // Posted Shorts waiting for review also get the AI's check, if the
       // uploader didn't stay on the details screen long enough for it.
       const unchecked = rows.filter((r) => r.author_id && r.status === 'in_review' && r.video_id && !['ready', 'unavailable'].includes(r.suggest_status));
@@ -820,14 +960,14 @@ function createStore({ db, video, ai, transcriber, tint = tintFromUrl, cleanUpEv
     async deleteUserUpload(userId, videoId) {
       const { rows } = await db.query(
         `delete from videos v where id = $1 and owner_id = $2 and not exists (select 1 from shorts s where s.video_id = v.id)
-         and not exists (select 1 from episodes e where e.video_id = v.id) returning asset_id, source_asset_id`,
+         and not exists (select 1 from episodes e where e.video_id = v.id) returning asset_id, source_asset_id, unedited_asset_id`,
         [videoId, userId]
       );
       if (!rows[0]) throw httpError(404, 'Upload not found');
       await deleteAssets(rows);
     },
 
-    async createUserShort(userId, { videoId, title, description = '', tags = [], coverSec = null }) {
+    async createUserShort(userId, { videoId, title, description = '', tags = [], coverSec = null, pictures = [] }) {
       const { rows } = await db.query('select * from videos where id = $1', [videoId]);
       const v = rows[0];
       if (!v || v.owner_id !== userId || v.wants_audio) throw httpError(404, 'Upload not found');
@@ -838,12 +978,14 @@ function createStore({ db, video, ai, transcriber, tint = tintFromUrl, cleanUpEv
         throw httpError(409, 'This video is already posted');
       }
       if (v.status === 'ready' && v.duration_sec > MAX_SHORT_SEC + 0.5) throw httpError(400, `A Short can be at most ${MAX_SHORT_SEC} seconds`);
+      if (pictures.length) await checkPictures(v, pictures);
       const id = newId('sh');
       await db.query(
         `insert into shorts (id, title, description, status, source, video_id, tags, cover_sec, author_id, created_by)
          values ($1, $2, $3, 'in_review', 'upload', $4, $5, $6, $7, $7)`,
         [id, title, description, videoId, tags, coverSec, userId]
       );
+      if (pictures.length) await setPictures(v, pictures);
       return id;
     },
 
@@ -886,7 +1028,7 @@ function createStore({ db, video, ai, transcriber, tint = tintFromUrl, cleanUpEv
 
     async myShorts(userId, baseUrl) {
       let { rows } = await db.query(`${SHORT_SELECT} where s.author_id = $1 order by s.created_at desc`, [userId]);
-      const pending = rows.filter((r) => r.video_id && !['ready', 'errored'].includes(r.video_status));
+      const pending = rows.filter((r) => r.video_id && (!['ready', 'errored'].includes(r.video_status) || editBusy(r.edit_status)));
       if (pending.length) {
         await syncVideos(pending.map((r) => r.video_id));
         ({ rows } = await db.query(`${SHORT_SELECT} where s.author_id = $1 order by s.created_at desc`, [userId]));
@@ -906,6 +1048,89 @@ function createStore({ db, video, ai, transcriber, tint = tintFromUrl, cleanUpEv
     async deleteMyShort(userId, id) {
       await ownShort(userId, id);
       await removeShort(id);
+    },
+
+    // ---- Pictures in Shorts ----
+
+    async createPicture(userId) {
+      // Unguessable, since anyone with the link can see the picture.
+      const id = `pic_${crypto.randomBytes(12).toString('hex')}`;
+      await db.query('insert into pictures (id, owner_id) values ($1, $2)', [id, userId]);
+      return { id };
+    },
+
+    // The next piece of a picture's file. offset is how much was sent before,
+    // so a piece sent twice (a lost reply) isn't added twice.
+    async addPictureData(userId, id, offset, data) {
+      const { rows } = await db.query(
+        `update pictures set data = data || $4::bytea where id = $1 and owner_id = $2 and status = 'uploading'
+         and octet_length(data) = $3 and octet_length(data) + $5 <= $6 returning octet_length(data) as size`,
+        [id, userId, offset, data, data.length, MAX_PICTURE_BYTES]
+      );
+      if (rows[0]) return { received: rows[0].size };
+      const { rows: cur } = await db.query('select octet_length(data) as size, status from pictures where id = $1 and owner_id = $2', [id, userId]);
+      if (!cur[0] || cur[0].status !== 'uploading') throw httpError(404, 'Picture not found');
+      if (cur[0].size === offset + data.length) return { received: cur[0].size };
+      if (cur[0].size === offset) throw httpError(413, `That picture is too big (at most ${MAX_PICTURE_BYTES >> 20} MB)`);
+      throw httpError(409, `Send the piece from ${cur[0].size}`);
+    },
+
+    // All of it is in: checked and made a sensible size.
+    async finishPicture(userId, id, baseUrl) {
+      const { rows } = await db.query('select status, data, width, height from pictures where id = $1 and owner_id = $2', [id, userId]);
+      const row = rows[0];
+      if (!row) throw httpError(404, 'Picture not found');
+      if (row.status !== 'ready') {
+        if (!editor) throw httpError(503, 'Adding pictures isn’t set up on this server');
+        if (!row.data.length) throw httpError(400, 'The picture is empty');
+        const pic = await editor.normalizePicture(Buffer.from(row.data));
+        await db.query("update pictures set data = $2, mime = $3, width = $4, height = $5, status = 'ready' where id = $1", [id, pic.data, pic.mime, pic.width, pic.height]);
+        Object.assign(row, pic);
+      }
+      return { id, url: pictureUrl(id, baseUrl), width: row.width, height: row.height };
+    },
+
+    async pictureFile(id) {
+      const { rows } = await db.query("select mime, data from pictures where id = $1 and status = 'ready'", [id]);
+      return rows[0] ? { mime: rows[0].mime, data: Buffer.from(rows[0].data) } : null;
+    },
+
+    // A Short's pictures for its uploader's editor, with the video to place
+    // them on (the one without pictures).
+    async myShortPictures(userId, id, baseUrl) {
+      const s = await ownShort(userId, id);
+      // Moves processing along too, as the uploader's screen checks back.
+      if (s.video_id) await syncVideos([s.video_id]);
+      const v = s.video_id && (await db.query('select * from videos where id = $1', [s.video_id])).rows[0];
+      if (!v) throw httpError(404, 'This Short has no video of its own');
+      const ids = v.pictures.map((p) => p.pictureId);
+      const { rows: files } = await db.query('select id, width, height from pictures where id = any($1)', [ids]);
+      const byId = new Map(files.map((f) => [f.id, f]));
+      const locked = v.pictures.length > 0 && v.edit_status === 'ready' && !v.unedited_asset_id;
+      const unedited = locked ? null : v.unedited_playback_id || (v.unedited_asset_id ? null : v.playback_id);
+      return {
+        videoUrl: unedited && video.hlsUrl(unedited),
+        durationSec: v.duration_sec,
+        aspectRatio: v.aspect_ratio,
+        editable: s.status === 'in_review' && !locked,
+        edit: { status: v.edit_status, error: v.edit_error },
+        pictures: v.pictures
+          .filter((p) => byId.has(p.pictureId))
+          .map((p) => {
+            const f = byId.get(p.pictureId);
+            return { ...p, picture: { id: f.id, url: pictureUrl(f.id, baseUrl), width: f.width, height: f.height } };
+          }),
+      };
+    },
+
+    // Uploaders can change the pictures while the Short waits for review.
+    async setMyShortPictures(userId, id, list, baseUrl) {
+      const s = await ownShort(userId, id);
+      if (s.status !== 'in_review') throw httpError(409, 'Only Shorts still in review can be edited');
+      const v = s.video_id && (await db.query('select * from videos where id = $1', [s.video_id])).rows[0];
+      if (!v) throw httpError(404, 'This Short has no video of its own');
+      await setPictures(v, list);
+      return this.myShortPictures(userId, id, baseUrl);
     },
 
     // ---- Captions on Shorts ----
@@ -974,6 +1199,7 @@ function createStore({ db, video, ai, transcriber, tint = tintFromUrl, cleanUpEv
         if (v && table === 'shorts' && v.duration_sec > MAX_SHORT_SEC + 0.5) {
           throw httpError(400, `A Short can be at most ${MAX_SHORT_SEC} seconds`);
         }
+        if (v && editBusy(v.edit_status)) throw httpError(409, 'The pictures are still being added to the video. Try again in a minute.');
         // Approving it answers any reports.
         await db.query('delete from content_reports where item_type = $1 and item_id = $2', [table === 'episodes' ? 'episode' : 'short', id]);
         // A release time in the future schedules it; otherwise it goes live now.
@@ -995,6 +1221,7 @@ function createStore({ db, video, ai, transcriber, tint = tintFromUrl, cleanUpEv
       `update ${table} set ${keys.map((k, i) => `${k} = $${i + 2}`).join(', ')}, updated_at = now() where id = $1`,
       [id, ...keys.map((k) => set[k])]
     );
+    if (table === 'shorts' && set.status === 'published' && row.video_id) await dropUnedited(row.video_id);
     return true;
   }
 }

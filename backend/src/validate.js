@@ -41,4 +41,30 @@ function cues(value) {
     .filter((c) => c.text);
 }
 
-module.exports = { str, num, tags, cues };
+// Pictures on a Short, in its own time: [{ pictureId, kind, startSec,
+// endSec }], plus for 'overlay' its top-left corner (x, y) and width (w) as
+// fractions of the video's size. It may hang off the edges a little.
+const MAX_PICTURES = 5;
+function pictures(value) {
+  if (!Array.isArray(value) || value.length > MAX_PICTURES) throw httpError(400, `pictures must be a list of up to ${MAX_PICTURES}`);
+  return value.map((p, i) => {
+    const name = `picture ${i + 1}`;
+    const pictureId = str(p?.pictureId, `${name} pictureId`, { required: true, max: 64 });
+    if (!['overlay', 'full'].includes(p.kind)) throw httpError(400, `${name} kind must be "overlay" or "full"`);
+    const startSec = num(p.startSec, `${name} startSec`, { required: true, min: 0, max: 600 });
+    const endSec = num(p.endSec, `${name} endSec`, { required: true, min: startSec + 0.2, max: 600 });
+    const round = (n) => Math.round(n * 1000) / 1000;
+    if (p.kind === 'full') return { pictureId, kind: 'full', startSec: round(startSec), endSec: round(endSec) };
+    return {
+      pictureId,
+      kind: 'overlay',
+      startSec: round(startSec),
+      endSec: round(endSec),
+      x: round(num(p.x, `${name} x`, { required: true, min: -0.5, max: 1 })),
+      y: round(num(p.y, `${name} y`, { required: true, min: -0.5, max: 1 })),
+      w: round(num(p.w, `${name} w`, { required: true, min: 0.05, max: 1 })),
+    };
+  });
+}
+
+module.exports = { str, num, tags, cues, pictures, MAX_PICTURES };
