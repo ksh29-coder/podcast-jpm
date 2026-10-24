@@ -1,13 +1,16 @@
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
-import { PictureEditor } from '../../../../../components/post/PictureEditor';
-import { api, type PlacedPicture, type ShortPictures } from '../../../../../lib/api';
-import { colors, radius, spacing, type } from '../../../../../theme';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { PictureEditor } from '../../components/post/PictureEditor';
+import { api, type PlacedPicture, type ShortPictures } from '../../lib/api';
+import { colors, radius, spacing, type } from '../../theme';
 
-// Change a Short's pictures while it waits for review. Saving makes the video
-// again with them, from the copy without pictures.
+// Change a Short's pictures while it waits for review (from its page in Me).
+// Saving makes the video again with them, from the copy without pictures.
+// Full screen, like the ＋ flow's pictures step, so the editor has the room.
 export default function EditPictures() {
+  const insets = useSafeAreaInsets();
   const { id } = useLocalSearchParams<{ id: string }>();
   const [data, setData] = useState<ShortPictures | null>(null);
   const [pictures, setPictures] = useState<PlacedPicture[]>([]);
@@ -24,16 +27,8 @@ export default function EditPictures() {
     );
   }, [id]);
 
-  if (!data) return error ? <Text style={[styles.error, { padding: spacing.xl }]}>{error}</Text> : <ActivityIndicator style={{ flex: 1 }} color={colors.text} />;
-
-  const busy = data.edit.status === 'rendering';
-  if (!data.editable || !data.videoUrl || busy) {
-    return (
-      <Text style={[type.subhead, { padding: spacing.xl }]}>
-        {busy ? 'Your last change is still being added to the video. Come back in a minute.' : 'Pictures can’t be changed once the Short is live.'}
-      </Text>
-    );
-  }
+  const busy = data?.edit.status === 'rendering';
+  const ready = data && data.editable && data.videoUrl && !busy;
 
   const save = async () => {
     setSaving(true);
@@ -50,16 +45,39 @@ export default function EditPictures() {
     }
   };
 
-  return (
-    <View style={styles.screen}>
-      <PictureEditor uri={data.videoUrl} durationSec={data.durationSec ?? 0} aspect={parseAspect(data.aspectRatio)} pictures={pictures} onChange={setPictures} />
-      <View style={styles.bottom}>
-        {error && <Text style={styles.error}>{error}</Text>}
-        <Pressable style={[styles.button, saving && { opacity: 0.4 }]} disabled={saving} onPress={save} accessibilityRole="button">
-          <Text style={styles.buttonText}>{saving ? 'Saving…' : 'Save pictures'}</Text>
-        </Pressable>
-        <Text style={[type.footnote, { textAlign: 'center' }]}>The video is made again with them; that takes a minute or two.</Text>
+  let body;
+  if (!data) body = error ? <Text style={[styles.error, styles.message]}>{error}</Text> : <ActivityIndicator style={{ flex: 1 }} color="#fff" />;
+  else if (!ready)
+    body = (
+      <Text style={[type.subhead, styles.message, { color: '#fff' }]}>
+        {busy ? 'Your last change is still being added to the video. Come back in a minute.' : 'Pictures can’t be changed once the Short is live.'}
+      </Text>
+    );
+  else
+    body = (
+      <View style={styles.editor}>
+        <PictureEditor uri={data.videoUrl!} durationSec={data.durationSec ?? 0} aspect={parseAspect(data.aspectRatio)} pictures={pictures} onChange={setPictures} />
       </View>
+    );
+
+  return (
+    <View style={[styles.screen, { paddingTop: insets.top + spacing.sm, paddingBottom: insets.bottom + spacing.lg }]}>
+      <View style={styles.header}>
+        <Pressable style={styles.cancel} onPress={() => router.back()} accessibilityRole="button">
+          <Text style={styles.cancelText}>Cancel</Text>
+        </Pressable>
+        <View style={{ flex: 1 }}>
+          <Text style={[type.headline, { color: '#fff' }]}>Pictures</Text>
+          {ready && <Text style={[type.footnote, { color: 'rgba(255,255,255,0.75)' }]}>Saving makes the video again; that takes a minute or two.</Text>}
+        </View>
+        {ready && (
+          <Pressable style={[styles.save, saving && { opacity: 0.4 }]} disabled={saving} onPress={save} accessibilityRole="button">
+            <Text style={styles.saveText}>{saving ? 'Saving…' : 'Save'}</Text>
+          </Pressable>
+        )}
+      </View>
+      {ready && error && <Text style={[styles.error, { paddingHorizontal: spacing.lg }]}>{error}</Text>}
+      {body}
     </View>
   );
 }
@@ -71,9 +89,13 @@ function parseAspect(ratio: string | null) {
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#000', paddingTop: spacing.md, gap: spacing.md },
-  bottom: { gap: spacing.sm, paddingHorizontal: spacing.lg, paddingBottom: spacing.xl, width: '100%', maxWidth: 760, alignSelf: 'center' },
+  screen: { flex: 1, backgroundColor: '#000', gap: spacing.md },
+  header: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingHorizontal: spacing.lg, width: '100%', maxWidth: 760, alignSelf: 'center' },
+  cancel: { paddingVertical: spacing.sm },
+  cancelText: { color: '#fff', fontSize: 16 },
+  save: { paddingHorizontal: spacing.xl, paddingVertical: spacing.sm + 2, borderRadius: radius.full, backgroundColor: colors.accent },
+  saveText: { color: colors.accentText, fontWeight: '700', fontSize: 16 },
+  editor: { flex: 1, width: '100%', maxWidth: 760, alignSelf: 'center' },
+  message: { padding: spacing.xl },
   error: { color: colors.danger, fontSize: 14 },
-  button: { alignItems: 'center', paddingVertical: spacing.md + 2, borderRadius: radius.full, backgroundColor: colors.accent },
-  buttonText: { color: colors.accentText, fontWeight: '700', fontSize: 17 },
 });

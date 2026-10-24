@@ -74,28 +74,20 @@ function Pictures({ id }: { id: string }) {
   const [data, setData] = useState<ShortPictures | null>(null);
   const [retrying, setRetrying] = useState(false);
 
-  // Fresh when coming back from changing them, and every few seconds while
-  // they're being added.
+  const load = useCallback(() => api.myShortPictures(id).then(setData, () => {}), [id]);
+  // Fresh when coming back from changing them.
   useFocusEffect(
     useCallback(() => {
-      let stopped = false;
-      let timer: ReturnType<typeof setTimeout>;
-      const tick = () =>
-        api.myShortPictures(id).then(
-          (d) => {
-            if (stopped) return;
-            setData(d);
-            if (d.edit.status === 'queued' || d.edit.status === 'rendering') timer = setTimeout(tick, 5000);
-          },
-          () => {}
-        );
-      tick();
-      return () => {
-        stopped = true;
-        clearTimeout(timer);
-      };
-    }, [id])
+      load();
+    }, [load])
   );
+  // Every few seconds while they're being added, including after "Try again".
+  const busy = data?.edit.status === 'queued' || data?.edit.status === 'rendering';
+  useEffect(() => {
+    if (!busy) return;
+    const timer = setInterval(load, 5000);
+    return () => clearInterval(timer);
+  }, [busy, load]);
 
   // Live Shorts' pictures are part of the video for good.
   if (!data || (!data.editable && !data.pictures.length)) return null;
@@ -103,7 +95,7 @@ function Pictures({ id }: { id: string }) {
   const n = data.pictures.length;
   let line = n ? `${n} picture${n === 1 ? '' : 's'} in the video.` : 'No pictures.';
   if (status === 'queued' || status === 'rendering') line = 'Adding the pictures to the video… This takes a minute or two.';
-  if (status === 'failed') line = `The pictures couldn’t be added: ${error || 'something went wrong'}`;
+  if (status === 'failed') line = error || 'The pictures couldn’t be added to the video. Try again.';
 
   const retry = async () => {
     setRetrying(true);
@@ -128,7 +120,7 @@ function Pictures({ id }: { id: string }) {
       {data.editable && (
         <View style={styles.line}>
           {status !== 'rendering' && (
-            <Pressable style={styles.small} onPress={() => router.push(`/my-short/pictures/${id}`)} accessibilityRole="button">
+            <Pressable style={styles.small} onPress={() => router.push(`/pictures/${id}`)} accessibilityRole="button">
               <Text style={styles.smallText}>{n ? 'Change pictures' : 'Add pictures'}</Text>
             </Pressable>
           )}

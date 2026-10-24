@@ -30,5 +30,6 @@ export function PreviewVideo({ uri, controls, onTime, onPlaying, onAspect, style
   });
   useEventListener(player, 'playingChange', ({ isPlaying }) => onPlaying(isPlaying));
   useEventListener(player, 'timeUpdate', ({ currentTime }) => onTime(currentTime));
-  return <VideoView player={player} style={style} contentFit="contain" nativeControls={false} />;
+  // No Live Text button over the paused frame: it sits on top of the pictures.
+  return <VideoView player={player} style={style} contentFit="contain" nativeControls={false} allowsVideoFrameAnalysis={false} />;
 }
