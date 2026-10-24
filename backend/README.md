@@ -1,6 +1,6 @@
 # Podcast backend
 
-Small Express service for the Internal AI Dev Wave app (build step 1 of the project brief).
+Small Express service for the Internal AI Wave app (build step 1 of the project brief).
 It serves the episode catalogue, the Shorts feed, listening progress, and media files.
 
 ## Run

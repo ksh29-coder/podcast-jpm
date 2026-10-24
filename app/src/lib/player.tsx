@@ -165,7 +165,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       player.play();
       player.setActiveForLockScreen(
         true,
-        { title: ep.title, artist: 'AI Dev Wave', artworkUrl: ep.artworkUrl },
+        { title: ep.title, artist: 'AI Wave', artworkUrl: ep.artworkUrl },
         { showSeekBackward: true, showSeekForward: true }
       );
       setEpisode(ep);

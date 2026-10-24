@@ -37,7 +37,7 @@ test('a session gets a short-lived key, the instructions and the tools', async (
   const res = await alice('POST', '/api/assistant/session');
   assert.strictEqual(res.status, 200);
   assert.deepStrictEqual([res.body.token, res.body.connectUrl, res.body.maxSec, res.body.leftTodaySec], ['ek_test', 'https://voice.test/calls', 180, 600]);
-  assert.match(sessions[0].instructions, /AI Dev Wave/);
+  assert.match(sessions[0].instructions, /AI Wave/);
   assert.deepStrictEqual(sessions[0].tools.map((t) => t.name), ['search_content', 'episode_details', 'latest', 'show_cards']);
   assert.strictEqual((await call(null)('POST', '/api/assistant/session')).status, 400);
 });

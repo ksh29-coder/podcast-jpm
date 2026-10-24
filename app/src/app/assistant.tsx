@@ -18,7 +18,7 @@ const LABEL: Record<AssistantState, string> = {
 };
 
 // The voice assistant, opened from the mic in Search: talk about what's on
-// AI Dev Wave, and what it finds appears as cards to open.
+// AI Wave, and what it finds appears as cards to open.
 export default function AssistantScreen() {
   const [voice, setVoice] = useState<string | null>(null);
   useEffect(() => {
@@ -89,7 +89,7 @@ function Conversation({ voice, onVoice }: { voice: string; onVoice: (v: string) 
         <Text style={type.title}>{LABEL[state]}</Text>
         {state === 'error' && <Text style={[type.subhead, styles.note, { color: colors.danger }]}>{error}</Text>}
         {(state === 'connecting' || state === 'thinking') && cards.length === 0 && (
-          <Text style={[type.subhead, styles.note]}>Ask about anything on AI Dev Wave, like “what do we have on testing?”</Text>
+          <Text style={[type.subhead, styles.note]}>Ask about anything on AI Wave, like “what do we have on testing?”</Text>
         )}
         {state === 'ended' && <Text style={[type.subhead, styles.note]}>Ask again any time from Search.</Text>}
       </View>

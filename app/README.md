@@ -1,4 +1,4 @@
-# AI Dev Wave app
+# AI Wave app
 
 Expo (React Native) app for iPhone and Android: build step 2–4 of the project brief.
 
@@ -8,7 +8,7 @@ Expo (React Native) app for iPhone and Android: build step 2–4 of the project 
 - **＋ (New)**: anyone can post a Short. Record with the camera or choose a video (Upload, bottom left),
   trim it to 90 seconds, then add details while it uploads; AI suggests the title, description, tags
   and cover from what's said. It waits for a host to approve it (Host mode → Shorts to review).
-- **Voice assistant** (mic in Search): a live spoken conversation about what's on AI Dev Wave. It
+- **Voice assistant** (mic in Search): a live spoken conversation about what's on AI Wave. It
   searches episodes, Shorts and transcripts, summarizes and recommends, and shows what it finds as
   cards. 3 minutes per conversation, 10 minutes a day. Needs app version 1.1.0 or later (native
   WebRTC; `plugins/withSpeakerAudio.js` sends its voice to the loudspeaker).

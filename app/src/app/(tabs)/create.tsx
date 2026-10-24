@@ -10,7 +10,7 @@ export default function CreateTab() {
   if (Platform.OS === 'web') {
     return (
       <View style={styles.screen}>
-        <Text style={[type.subhead, { textAlign: 'center' }]}>Post Shorts from the AI Dev Wave app on your phone.</Text>
+        <Text style={[type.subhead, { textAlign: 'center' }]}>Post Shorts from the AI Wave app on your phone.</Text>
       </View>
     );
   }

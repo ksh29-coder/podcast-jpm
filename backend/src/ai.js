@@ -13,7 +13,7 @@ function openRouterAi({ apiKey = process.env.OPENROUTER_API_KEY, model = process
     if (!apiKey) throw Object.assign(new Error('AI isn’t set up on this server'), { status: 503 });
     const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
-      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json', 'X-Title': 'AI Dev Wave' },
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json', 'X-Title': 'AI Wave' },
       body: JSON.stringify({
         model,
         response_format: { type: 'json_object' },

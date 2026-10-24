@@ -117,7 +117,7 @@ export function useVoiceAssistant(voice: string) {
         startedAt.current = Date.now();
         setLeft(session.maxSec);
         setState('thinking');
-        c.send({ type: 'response.create', response: { instructions: 'Greet the person in one short, friendly sentence and ask what they would like to find on AI Dev Wave.' } });
+        c.send({ type: 'response.create', response: { instructions: 'Greet the person in one short, friendly sentence and ask what they would like to find on AI Wave.' } });
         const deadline = Date.now() + session.maxSec * 1000;
         const t = setInterval(() => {
           const s = Math.max(0, Math.round((deadline - Date.now()) / 1000));
