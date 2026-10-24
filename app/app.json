@@ -82,7 +82,8 @@
           "cameraPermission": "Record Shorts for the podcast."
         }
       ],
-      "./plugins/withSpeakerAudio"
+      "./plugins/withSpeakerAudio",
+      "./plugins/withSceneLifecycle"
     ],
     "scheme": "aidevwave",
     "experiments": {
