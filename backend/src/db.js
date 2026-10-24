@@ -219,6 +219,32 @@ create table if not exists voice_usage (
   seconds int not null,
   primary key (user_id, day)
 );
+
+-- Pictures an uploader adds to their Short, drawn into the video with
+-- ffmpeg (edit.js): [{ pictureId, kind, startSec, endSec, x, y, w }], kind
+-- 'overlay' (on top) or 'full' (filling it). edit_status: none, queued
+-- (to make), rendering, ready (in the video), failed.
+alter table videos add column if not exists pictures jsonb not null default '[]';
+alter table videos add column if not exists edit_status text not null default 'none';
+alter table videos add column if not exists edit_started_at timestamptz;
+alter table videos add column if not exists edit_error text;
+-- The video without the pictures, kept to make it again when they change,
+-- until the Short goes live.
+alter table videos add column if not exists unedited_asset_id text;
+alter table videos add column if not exists unedited_playback_id text;
+-- The picture files, sent in pieces (status uploading), then checked and
+-- made a sensible size (ready). Deleted once a Short goes live, and when
+-- nothing has used them for a day.
+create table if not exists pictures (
+  id text primary key,
+  owner_id text not null,
+  status text not null default 'uploading',
+  data bytea not null default '',
+  mime text,
+  width int,
+  height int,
+  created_at timestamptz not null default now()
+);
 `;
 
 // Creates the tables if needed, and fills an empty database from

@@ -1,17 +1,19 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Platform } from 'react-native';
 import { Redirect } from 'expo-router';
-import { api, type PostKind } from '../../lib/api';
+import { api, type PlacedPicture, type PostKind } from '../../lib/api';
 import { uploadFile } from './uploadFile';
 
 // The Short or episode being posted, shared by the posting screens (camera or
-// file choice, trim, details). The upload starts when the person leaves the
+// file choice, trim, pictures for a Short, details). The upload starts when the person leaves the
 // trim screen and carries on in the background while they fill in the details.
 // Episodes are posted from the website only and are never trimmed.
 
 // `file` is the browser's File on the web; the phone uses `uri`.
 export type Picked = { uri: string; durationSec: number | null; kind?: PostKind; file?: Blob };
 export type Upload = { videoId: string | null; percent: number; done: boolean; error: string | null };
+// The part of the chosen video that's kept.
+export type Kept = { startSec: number; durationSec: number };
 
 type PostValue = {
   picked: Picked | null;
@@ -22,6 +24,11 @@ type PostValue = {
   startUpload: (range?: { startSec: number; endSec: number }, video?: Picked) => void;
   // Tries again with the same range after a failure.
   retryUpload: () => void;
+  kept: Kept | null;
+  setKept: (k: Kept) => void;
+  // Pictures added to a Short, sent with it when it's posted.
+  pictures: PlacedPicture[];
+  setPictures: (p: PlacedPicture[]) => void;
   // Stops any upload and forgets the video (after posting or discarding).
   reset: () => void;
 };
@@ -49,6 +56,8 @@ export function NoVideo() {
 export function PostProvider({ children }: { children: ReactNode }) {
   const [picked, setPicked] = useState<Picked | null>(null);
   const [upload, setUpload] = useState<Upload | null>(null);
+  const [kept, setKept] = useState<Kept | null>(null);
+  const [pictures, setPictures] = useState<PlacedPicture[]>([]);
   const abort = useRef<AbortController | null>(null);
   const last = useRef<{ range?: { startSec: number; endSec: number }; video?: Picked }>({});
 
@@ -77,9 +86,15 @@ export function PostProvider({ children }: { children: ReactNode }) {
     abort.current = null;
     setPicked(null);
     setUpload(null);
+    setKept(null);
+    setPictures([]);
   };
 
   return (
-    <PostContext.Provider value={{ picked, setPicked, upload, startUpload, retryUpload: () => startUpload(last.current.range, last.current.video), reset }}>{children}</PostContext.Provider>
+    <PostContext.Provider
+      value={{ picked, setPicked, upload, startUpload, retryUpload: () => startUpload(last.current.range, last.current.video), kept, setKept, pictures, setPictures, reset }}
+    >
+      {children}
+    </PostContext.Provider>
   );
 }

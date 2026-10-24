@@ -42,6 +42,16 @@ export default function MeScreen() {
       load();
     }, [load])
   );
+  // And every few seconds while a video is being processed or having
+  // pictures added (which also moves that along on the server).
+  const working = !!shorts?.some((s) => s.video && (!['ready', 'errored'].includes(s.video.status) || editing(s)));
+  useFocusEffect(
+    useCallback(() => {
+      if (!working) return;
+      const timer = setInterval(load, 5000);
+      return () => clearInterval(timer);
+    }, [working, load])
+  );
 
   if (error && !shorts) return <ErrorState message={error} onRetry={load} />;
   if (!profile || !shorts) return <ActivityIndicator style={{ flex: 1, backgroundColor: colors.bg }} color={colors.text} />;
@@ -197,9 +207,21 @@ const STATUS: Record<MyItem['status'], { label: string; color: string }> = {
   draft: { label: 'Hidden', color: colors.textMuted },
 };
 
+// Where adding pictures to a Short's video has got to.
+const editStatus = (s: MyItem) => (s.kind === 'short' ? s.video?.edit?.status : undefined);
+const editing = (s: MyItem) => editStatus(s) === 'queued' || editStatus(s) === 'rendering';
+
 function MyShortRow({ short, onEdit, onDelete }: { short: MyItem; onEdit: () => void; onDelete: () => void }) {
   const status = STATUS[short.status];
-  const processing = short.video && short.video.status !== 'ready';
+  const processing = short.video && (short.video.status !== 'ready' || editing(short));
+  const label =
+    short.video?.status === 'errored'
+      ? 'Processing failed'
+      : editing(short)
+        ? 'Adding pictures…'
+        : editStatus(short) === 'failed'
+          ? 'Pictures couldn’t be added'
+          : 'Processing…';
   return (
     <View style={styles.item}>
       {short.artworkUrl && !processing ? (
@@ -215,7 +237,7 @@ function MyShortRow({ short, onEdit, onDelete }: { short: MyItem; onEdit: () => 
           {short.kind === 'episode' && <Text style={type.footnote}>Episode ·</Text>}
           <View style={[styles.dot, { backgroundColor: status.color }]} />
           <Text style={[type.footnote, { color: status.color, fontWeight: '700' }]}>{status.label}</Text>
-          {processing && <Text style={type.footnote}>· {short.video?.status === 'errored' ? 'Processing failed' : 'Processing…'}</Text>}
+          {(processing || editStatus(short) === 'failed') && <Text style={type.footnote}>· {label}</Text>}
         </View>
         {short.status === 'published' && (
           <Text style={type.footnote}>

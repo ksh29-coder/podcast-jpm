@@ -1,5 +1,5 @@
 import { getItem, setItem } from './storage';
-import { request, type Captions, type Chapter, type Clip, type Cue, type Episode, type Mention, type Stats } from './api';
+import { request, type Captions, type Chapter, type Clip, type Cue, type EditStatus, type Episode, type Mention, type Stats } from './api';
 
 // What the AI suggested for an episode, waiting for a host to apply it.
 export type AiSuggestions = {
@@ -31,6 +31,8 @@ export type VideoState = {
   // false when the video has no sound, so the episode will be video-only.
   hasAudio?: boolean | null;
   transcriptStatus?: string;
+  // Pictures the uploader added, being drawn into a Short's video.
+  edit?: { status: EditStatus; error: string | null };
   // 'mux' (Whisper captions) or the speech-to-text model that made it.
   transcriptSource?: string | null;
   durationSec?: number | null;
@@ -66,6 +68,8 @@ export type HostShort = Clip &
     // Posted from the app by someone (null when a host made it).
     author: { name: string; key: string } | null;
     coverSec: number | null;
+    // How many pictures the uploader added (they're in the video once edit is ready).
+    pictureCount: number;
     reports?: string[];
     reviewNote: string | null;
     aiCheck: AiCheck;
@@ -161,6 +165,7 @@ export function videoLabel(v: VideoState | null, { needsAudio = false } = {}) {
   if (!v) return null;
   if (v.status === 'errored') return `Failed: ${v.error || 'processing error'}`;
   if (v.status === 'uploading') return 'Waiting for upload';
+  if (v.edit?.status === 'queued' || v.edit?.status === 'rendering') return 'Adding pictures…';
   if (v.status === 'processing') return 'Processing video…';
   if (needsAudio && !v.audioReady && v.hasAudio !== false) return 'Preparing audio…';
   return null;

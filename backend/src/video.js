@@ -12,6 +12,7 @@
 // https://www.mux.com/docs/guides/secure-video-playback
 
 const crypto = require('crypto');
+const fs = require('fs/promises');
 
 const API = 'https://api.mux.com/video/v1';
 const SIGNED = 's:';
@@ -129,6 +130,24 @@ function muxVideo({
         textTrack: text ? { id: text.id, status: text.status } : null,
         hasAudioTrack: (data.tracks || []).some((t) => t.type === 'audio'),
       };
+    },
+
+    // A link to download the video's file, to make an edited copy of it
+    // ourselves; null while the service prepares one (ask again shortly).
+    async downloadUrl(assetId) {
+      const data = await call('GET', `/assets/${assetId}`);
+      if (data.master?.status === 'ready' && data.master.url) return data.master.url;
+      if (data.master_access !== 'temporary' || data.master?.status === 'errored') {
+        await call('PUT', `/assets/${assetId}/master-access`, { master_access: 'temporary' });
+      }
+      return null;
+    },
+
+    // Sends a video file we made (e.g. with pictures added) to an upload URL
+    // from createUpload.
+    async uploadFile(uploadUrl, filePath) {
+      const res = await fetch(uploadUrl, { method: 'PUT', body: await fs.readFile(filePath) });
+      if (!res.ok) throw Object.assign(new Error(`Video service: upload failed (${res.status})`), { status: 502 });
     },
 
     // Gone for good, with its files and links.

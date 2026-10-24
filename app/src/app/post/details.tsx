@@ -17,7 +17,7 @@ import { colors, radius, spacing, type } from '../../theme';
 // offered underneath instead.
 export default function PostDetails() {
   const insets = useSafeAreaInsets();
-  const { picked, upload, retryUpload, reset } = usePost();
+  const { picked, upload, retryUpload, reset, pictures } = usePost();
   const isEpisode = picked?.kind === 'episode';
   // The ＋ screens' own stack; its parent is the app's, where they sit as one overlay.
   const navigation = useNavigation();
@@ -80,7 +80,9 @@ export default function PostDetails() {
     setError(null);
     try {
       const details = { title: title.trim(), description: description.trim(), tags, ...(coverSec != null && { coverSec }) };
-      await (isEpisode ? api.postEpisode(videoId, details) : api.postShort(videoId, details));
+      await (isEpisode
+        ? api.postEpisode(videoId, details)
+        : api.postShort(videoId, { ...details, pictures: pictures.map(({ picture, ...placement }) => placement) }));
       reset();
       close();
       router.navigate('/me?posted=1');
@@ -188,6 +190,22 @@ export default function PostDetails() {
             <Text style={type.footnote}>Frames to choose from appear once the video is processed.</Text>
           )}
         </Field>
+
+        {!isEpisode && (
+          <Field label="Pictures" suggestedNow={false}>
+            <View style={styles.line}>
+              {pictures.slice(0, 5).map((p, i) => (
+                <Image key={i} source={{ uri: p.picture.url }} style={styles.pictureThumb} />
+              ))}
+              <Text style={[type.footnote, { flex: 1 }]}>
+                {pictures.length ? `${pictures.length} picture${pictures.length === 1 ? '' : 's'}, added to the video after you submit.` : 'None added.'}
+              </Text>
+              <Pressable style={styles.small} onPress={() => router.push('/post/edit?from=details')} accessibilityRole="button">
+                <Text style={styles.smallText}>{pictures.length ? 'Change' : 'Add'}</Text>
+              </Pressable>
+            </View>
+          </Field>
+        )}
 
         {!isEpisode && videoId && uploaded && state?.status !== 'errored' && (
           <CaptionsEditor
@@ -324,6 +342,7 @@ const styles = StyleSheet.create({
   frameImage: { width: 68, height: 68, backgroundColor: colors.cardHigh },
   frameBadge: { position: 'absolute', top: 4, right: 4, width: 20, height: 20, borderRadius: 10, backgroundColor: colors.highlight, alignItems: 'center', justifyContent: 'center' },
   frameTime: { ...type.caption, paddingVertical: 2, fontVariant: ['tabular-nums'] },
+  pictureThumb: { width: 36, height: 36, borderRadius: radius.sm, backgroundColor: colors.cardHigh },
   note: { flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-start' },
   error: { color: colors.danger, fontSize: 14 },
   button: { alignItems: 'center', paddingVertical: spacing.md + 2, borderRadius: radius.full, backgroundColor: colors.accent },

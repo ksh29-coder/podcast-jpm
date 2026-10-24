@@ -37,6 +37,13 @@ function fakeVideo() {
       assets.get(assetId).captionsRequested = !!opts.captions;
       return { assetId };
     },
+    async downloadUrl(assetId) {
+      state.calls.push(['downloadUrl', assetId]);
+      return `https://download.test/${assetId}.mp4`;
+    },
+    async uploadFile(uploadUrl) {
+      state.calls.push(['uploadFile', uploadUrl]);
+    },
     async deleteAsset(assetId) {
       state.calls.push(['deleteAsset', assetId]);
       assets.delete(assetId);

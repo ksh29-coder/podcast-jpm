@@ -77,6 +77,13 @@ export default function ReviewShort() {
         <ReportsLine reports={short.reports} />
         <AiCheckLine check={short.aiCheck} />
         <Text style={ui.hint}>The AI only reads what’s said. Check what’s on screen yourself, such as code or documents.</Text>
+        {'pictureCount' in short && short.pictureCount > 0 && (
+          <Text style={ui.hint}>
+            {short.video?.edit?.status === 'failed'
+              ? 'The uploader added pictures, but they couldn’t be put in the video, so it plays without them.'
+              : `The uploader added ${short.pictureCount} picture${short.pictureCount === 1 ? '' : 's'} to the video. Check them as you watch.`}
+          </Text>
+        )}
       </View>
 
       <Text style={ui.label}>Title</Text>

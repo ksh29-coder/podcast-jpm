@@ -1,6 +1,6 @@
 const express = require('express');
 const { httpError } = require('./store');
-const { cues, num, str, tags } = require('./validate');
+const { cues, num, pictures, str, tags } = require('./validate');
 
 // Posting Shorts (phone or website) and episodes (website), open to
 // everyone: a name and the guidelines first, then upload (a Short can keep
@@ -77,7 +77,11 @@ function meRouter({ store, engagement, baseUrl }) {
       const b = req.body || {};
       const d = details(b);
       if (!d.title) throw httpError(400, 'title is required');
-      const id = await store.createUserShort(req.user.id, { ...d, videoId: str(b.videoId, 'videoId', { required: true }) });
+      const id = await store.createUserShort(req.user.id, {
+        ...d,
+        videoId: str(b.videoId, 'videoId', { required: true }),
+        pictures: b.pictures === undefined ? [] : pictures(b.pictures),
+      });
       res.status(201).json(await mine(req, id));
     })
   );
@@ -98,6 +102,27 @@ function meRouter({ store, engagement, baseUrl }) {
       await store.deleteMyShort(req.user.id, req.params.id);
       res.status(204).end();
     })
+  );
+
+  // Pictures added to a Short. The file goes up in pieces of up to 4 MB (the
+  // most a request can carry), then is checked; the list of pictures, with
+  // where and when each shows, comes with the Short or changes in review.
+  r.post('/pictures', ah(async (req, res) => res.status(201).json(await store.createPicture(req.user.id))));
+  r.put(
+    '/pictures/:id',
+    express.raw({ type: () => true, limit: '4mb' }),
+    ah(async (req, res) => {
+      const offset = Number(req.query.offset);
+      if (!Number.isInteger(offset) || offset < 0) throw httpError(400, 'offset must be a whole number');
+      if (!Buffer.isBuffer(req.body) || !req.body.length) throw httpError(400, 'Send the picture’s bytes');
+      res.json(await store.addPictureData(req.user.id, req.params.id, offset, req.body));
+    })
+  );
+  r.post('/pictures/:id/done', ah(async (req, res) => res.json(await store.finishPicture(req.user.id, req.params.id, baseUrl(req)))));
+  r.get('/shorts/:id/pictures', ah(async (req, res) => res.json(await store.myShortPictures(req.user.id, req.params.id, baseUrl(req)))));
+  r.put(
+    '/shorts/:id/pictures',
+    ah(async (req, res) => res.json(await store.setMyShortPictures(req.user.id, req.params.id, pictures(req.body?.pictures), baseUrl(req))))
   );
 
   // Captions: checked and fixed before posting (by upload) or while in review (by Short).

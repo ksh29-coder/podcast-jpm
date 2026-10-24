@@ -13,7 +13,7 @@ import { colors, radius, spacing, type } from '../../theme';
 // starts the upload and moves on to the details.
 export default function PostPreview() {
   const insets = useSafeAreaInsets();
-  const { picked, startUpload } = usePost();
+  const { picked, startUpload, setKept } = usePost();
   // A wide window (the website): the video centred above the controls,
   // instead of filling the screen behind them.
   const { width, height } = useWindowDimensions();
@@ -45,7 +45,9 @@ export default function PostPreview() {
   const next = () => {
     player.pause();
     startUpload(whole ? undefined : { startSec: range.start, endSec: range.end });
-    router.replace('/post/details');
+    setKept({ startSec: whole ? 0 : range.start, durationSec: whole ? duration : range.end - range.start });
+    // Shorts can have pictures added next; episodes go straight to the details.
+    router.replace(picked.kind === 'episode' ? '/post/details' : '/post/edit');
   };
 
   return (
