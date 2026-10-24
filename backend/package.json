@@ -24,5 +24,8 @@
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.10"
+  },
+  "allowScripts": {
+    "ffmpeg-static": true
   }
 }
