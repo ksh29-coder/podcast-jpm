@@ -54,7 +54,7 @@ function createApp({ db = connect(), video = muxVideo(), ai = openRouterAi(), tr
   // Landing page so the bare domain shows the service is up.
   app.get('/', (req, res) => {
     res.json({
-      service: 'AI Dev Wave backend',
+      service: 'AI Wave backend',
       ok: true,
       endpoints: ['/api/episodes', '/api/episodes/:id', '/api/episodes/:id/transcript', '/api/search?q=', '/api/shorts', '/api/shorts/:id/captions', '/api/progress', '/api/items/*', '/api/me/*', '/api/assistant/*', '/api/host/*', '/media/*'],
     });

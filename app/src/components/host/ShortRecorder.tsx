@@ -107,7 +107,7 @@ export function ShortRecorder({
           <Text style={styles.permButtonText}>Allow camera and microphone</Text>
         </Pressable>
         {(!camPerm.canAskAgain || !micPerm.canAskAgain) && (
-          <Text style={styles.permHint}>If nothing happens, turn them on for AI Dev Wave in the Settings app.</Text>
+          <Text style={styles.permHint}>If nothing happens, turn them on for AI Wave in the Settings app.</Text>
         )}
         {onPickFromLibrary && (
           <Pressable style={[styles.permButton, { backgroundColor: 'rgba(255,255,255,0.18)' }]} onPress={onPickFromLibrary}>

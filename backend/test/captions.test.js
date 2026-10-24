@@ -22,7 +22,7 @@ const fakeAi = {
   async fixCaptions(input) {
     fixCalls.push(input);
     // Fixes the first line, empties the second (which keeps what was said).
-    return { lines: input.lines.map((l, i) => (i === 0 ? 'Welcome to the AI Dev Wave' : i === 1 ? '' : l)) };
+    return { lines: input.lines.map((l, i) => (i === 0 ? 'Welcome to the AI Wave' : i === 1 ? '' : l)) };
   },
 };
 let server;
@@ -62,15 +62,15 @@ test('a posted Short’s captions can be fixed before posting and in review, the
 
   // Fixed before posting; an emptied line is dropped.
   const fixed = await alice('PUT', `/api/me/uploads/${up.videoId}/captions`, {
-    cues: [{ ...WELCOME, text: '  Welcome to   AI Dev Wave ' }, { ...TODAY, text: ' ' }],
+    cues: [{ ...WELCOME, text: '  Welcome to   AI Wave ' }, { ...TODAY, text: ' ' }],
   });
-  assert.deepStrictEqual(fixed.body, { status: 'ready', source: 'edited', cues: [{ ...WELCOME, text: 'Welcome to AI Dev Wave' }] });
+  assert.deepStrictEqual(fixed.body, { status: 'ready', source: 'edited', cues: [{ ...WELCOME, text: 'Welcome to AI Wave' }] });
   assert.strictEqual((await alice('PUT', `/api/me/uploads/${up.videoId}/captions`, { cues: [{ startSec: 5, endSec: 2, text: 'x' }] })).status, 400);
 
   const short = (await alice('POST', '/api/me/shorts', { videoId: up.videoId, title: 'Operators' })).body;
   // Not public while in review.
   assert.strictEqual((await bob('GET', `/api/shorts/${short.id}/captions`)).status, 404);
-  assert.strictEqual((await alice('GET', `/api/me/shorts/${short.id}/captions`)).body.cues[0].text, 'Welcome to AI Dev Wave');
+  assert.strictEqual((await alice('GET', `/api/me/shorts/${short.id}/captions`)).body.cues[0].text, 'Welcome to AI Wave');
   assert.strictEqual((await bob('PUT', `/api/me/shorts/${short.id}/captions`, { cues: [WELCOME] })).status, 404);
   assert.strictEqual((await alice('PUT', `/api/me/shorts/${short.id}/captions`, { cues: [WELCOME, TODAY] })).body.cues.length, 2);
 
@@ -110,8 +110,8 @@ test('a Short cut from an episode uses the episode’s lines for that part', asy
 });
 
 test('the AI tidies caption lines without saving them', async () => {
-  const res = await alice('POST', '/api/me/captions/tidy', { cues: [WELCOME, TODAY], title: 'AI Dev Wave intro', tags: ['intro'] });
-  assert.deepStrictEqual(res.body.cues, [{ ...WELCOME, text: 'Welcome to the AI Dev Wave' }, TODAY]);
-  assert.deepStrictEqual(fixCalls.at(-1), { title: 'AI Dev Wave intro', description: undefined, tags: ['intro'], lines: [WELCOME.text, TODAY.text] });
+  const res = await alice('POST', '/api/me/captions/tidy', { cues: [WELCOME, TODAY], title: 'AI Wave intro', tags: ['intro'] });
+  assert.deepStrictEqual(res.body.cues, [{ ...WELCOME, text: 'Welcome to the AI Wave' }, TODAY]);
+  assert.deepStrictEqual(fixCalls.at(-1), { title: 'AI Wave intro', description: undefined, tags: ['intro'], lines: [WELCOME.text, TODAY.text] });
   assert.strictEqual((await alice('POST', '/api/me/captions/tidy', {})).status, 400);
 });

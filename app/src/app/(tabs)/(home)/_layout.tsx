@@ -9,7 +9,7 @@ export default function HomeLayout() {
       <Stack.Screen
         name="index"
         options={{
-          title: 'AI Dev Wave',
+          title: 'AI Wave',
           // Reviewing what people post, for hosts.
           headerRight: () => (
             <Pressable onPress={() => router.push('/host')} accessibilityRole="button" accessibilityLabel="Host mode" hitSlop={10}>

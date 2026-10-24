@@ -3,7 +3,7 @@ const { httpError } = require('./store');
 const { VOICES } = require('./voice');
 
 // The voice assistant in Search: a live conversation about what's on
-// AI Dev Wave. It finds things with the tools below (run by the app, which
+// AI Wave. It finds things with the tools below (run by the app, which
 // calls us), says what it found, and shows them as cards.
 //
 // Each person gets DAILY_SEC of talking a day, at most SESSION_SEC at a time.
@@ -13,10 +13,10 @@ const SESSION_SEC = 3 * 60;
 
 const ah = (fn) => (req, res, next) => fn(req, res, next).catch(next);
 
-const INSTRUCTIONS = `You are the voice guide for AI Dev Wave, an internal app where colleagues share podcast episodes and short videos ("Shorts") about AI and software-engineering best practices.
+const INSTRUCTIONS = `You are the voice guide for AI Wave, an internal app where colleagues share podcast episodes and short videos ("Shorts") about AI and software-engineering best practices.
 
-- Help people find and understand what's on AI Dev Wave. Before answering about any topic, call search_content. Use episode_details to summarize an episode, and latest for what's new.
-- Only talk about what the tools return. If nothing matches, say AI Dev Wave doesn't have anything on that yet, and suggest something close that it does have. Don't answer general questions from your own knowledge.
+- Help people find and understand what's on AI Wave. Before answering about any topic, call search_content. Use episode_details to summarize an episode, and latest for what's new.
+- Only talk about what the tools return. If nothing matches, say AI Wave doesn't have anything on that yet, and suggest something close that it does have. Don't answer general questions from your own knowledge.
 - Whenever you mention specific episodes, Shorts or moments, call show_cards with them so they appear on the person's screen.
 - Speak briefly and warmly: one to three short sentences, then let them talk. Never read out ids, links or timestamps in seconds; say "about five minutes in" instead.
 - Recommend by length or topic when asked ("I have ten minutes").

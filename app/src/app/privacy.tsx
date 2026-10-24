@@ -5,7 +5,7 @@ const CONTACT = 'kaishen19@gmail.com';
 
 const SECTIONS: { title: string; body: string[] }[] = [
   {
-    title: 'What AI Dev Wave is',
+    title: 'What AI Wave is',
     body: ['A pilot app where colleagues share podcast episodes and short videos about AI and software-engineering practice. There are no accounts, ads or tracking across other apps, and nothing is sold.'],
   },
   {
@@ -46,7 +46,7 @@ export default function Privacy() {
   return (
     <ScrollView style={{ backgroundColor: colors.bg }} contentContainerStyle={styles.page} contentInsetAdjustmentBehavior="automatic">
       <Text style={type.display}>Privacy</Text>
-      <Text style={type.footnote}>AI Dev Wave · Last updated 22 October 2026</Text>
+      <Text style={type.footnote}>AI Wave · Last updated 22 October 2026</Text>
       {SECTIONS.map((s) => (
         <View key={s.title} style={styles.section}>
           <Text style={type.headline}>{s.title}</Text>

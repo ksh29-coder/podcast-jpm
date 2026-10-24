@@ -1,7 +1,7 @@
 {
   "name": "podcast-backend",
   "version": "1.0.0",
-  "description": "Internal AI Dev Wave backend",
+  "description": "Internal AI Wave backend",
   "main": "src/server.js",
   "directories": {
     "test": "test"

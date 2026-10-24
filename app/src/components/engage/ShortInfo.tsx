@@ -14,7 +14,7 @@ import { Tags } from './Tags';
 export function ShortInfo({ short }: { short: Short }) {
   const [open, setOpen] = useState(false);
   // Who it's from: the person who posted it, else the episode it was cut from.
-  const name = short.author?.name ?? short.episodeTitle ?? 'AI Dev Wave';
+  const name = short.author?.name ?? short.episodeTitle ?? 'AI Wave';
   const hasMore = !!short.description || short.tags.length > 0 || short.title.length > 60;
 
   return (

@@ -47,7 +47,7 @@ function Studio() {
   return (
     <View style={styles.root}>
       <View style={styles.sidebar}>
-        <SideLink label="Back to AI Dev Wave" icon="chevronLeft" muted onPress={() => router.replace('/')} />
+        <SideLink label="Back to AI Wave" icon="chevronLeft" muted onPress={() => router.replace('/')} />
         <Text style={styles.heading}>Host Studio</Text>
         <View style={{ gap: 2 }}>
           {SECTIONS.map((s) => (

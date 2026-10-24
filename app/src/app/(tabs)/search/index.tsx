@@ -145,7 +145,7 @@ const web = Platform.OS === 'web';
 // The way into the voice assistant: talk instead of typing.
 function AskCard() {
   return (
-    <Pressable onPress={() => router.push('/assistant')} style={({ pressed }) => [styles.ask, pressed && { opacity: 0.85 }]} accessibilityRole="button" accessibilityLabel="Ask AI Dev Wave out loud">
+    <Pressable onPress={() => router.push('/assistant')} style={({ pressed }) => [styles.ask, pressed && { opacity: 0.85 }]} accessibilityRole="button" accessibilityLabel="Ask AI Wave out loud">
       <View style={styles.askMic}>
         <Icon name="mic" size={26} color={colors.accentText} />
       </View>

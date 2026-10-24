@@ -6,7 +6,7 @@ import * as Linking from 'expo-linking';
 export async function shareItem({ title, path }: { title: string; path: string }) {
   const url = Linking.createURL(path);
   try {
-    await Share.share({ title, message: `${title} · AI Dev Wave\n${url}`, url });
+    await Share.share({ title, message: `${title} · AI Wave\n${url}`, url });
   } catch {
     // Dismissed or unavailable: nothing to do.
   }

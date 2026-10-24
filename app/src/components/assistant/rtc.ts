@@ -13,7 +13,7 @@ export async function connectVoice({ token, connectUrl, onEvent }: VoiceOptions)
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     webrtc = require('react-native-webrtc');
   } catch {
-    throw new Error('This version of the app can’t talk yet. Update AI Dev Wave from TestFlight.');
+    throw new Error('This version of the app can’t talk yet. Update AI Wave from TestFlight.');
   }
   const pc = new webrtc.RTCPeerConnection();
   const stream = await webrtc.mediaDevices.getUserMedia({ audio: true, video: false });

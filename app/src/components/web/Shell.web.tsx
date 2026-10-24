@@ -73,9 +73,9 @@ export function Shell({ children }: { children: ReactNode }) {
 function Sidebar({ path }: { path: string }) {
   return (
     <View style={styles.sidebar}>
-      <Pressable onPress={() => router.navigate('/')} style={styles.brand} accessibilityRole="link" accessibilityLabel="AI Dev Wave home">
+      <Pressable onPress={() => router.navigate('/')} style={styles.brand} accessibilityRole="link" accessibilityLabel="AI Wave home">
         <Logo />
-        <Text style={styles.brandText}>AI Dev Wave</Text>
+        <Text style={styles.brandText}>AI Wave</Text>
       </Pressable>
       <Pressable onPress={() => router.navigate('/create')} style={(s) => [styles.newButton, hovered(s) && { opacity: 0.88 }]} accessibilityRole="link">
         <Icon name="plus" size={18} color={colors.accentText} />
