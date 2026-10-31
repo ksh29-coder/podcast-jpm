@@ -4,6 +4,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from '../../../components/Icon';
 import { api, type Comment, type ItemType } from '../../../lib/api';
+import { offerAlerts } from '../../../lib/alerts';
 import { blockAuthor, unblockAll, useBlocked } from '../../../lib/blocked';
 import { getDisplayName, saveDisplayName } from '../../../lib/device';
 import { formatDate, formatTime } from '../../../lib/format';
@@ -107,6 +108,7 @@ export default function CommentsScreen() {
       setBody('');
       setReplyTo(null);
       if (c.parentId) setOpen((o) => [...o, c.parentId!]);
+      offerAlerts('We can tell you when someone replies to your comment. Change this any time in Me.');
     } catch (e) {
       setSendError(e instanceof Error ? e.message : String(e));
     } finally {

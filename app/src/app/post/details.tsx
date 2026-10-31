@@ -7,6 +7,7 @@ import { CaptionsEditor } from '../../components/engage/CaptionsEditor';
 import { Icon } from '../../components/Icon';
 import { NoVideo, usePost, type Upload } from '../../components/post/PostContext';
 import { TagsField } from '../../components/post/TagsField';
+import { offerAlerts } from '../../lib/alerts';
 import { api, type Cue, type UploadState } from '../../lib/api';
 import { formatTime } from '../../lib/format';
 import { colors, radius, spacing, type } from '../../theme';
@@ -86,6 +87,7 @@ export default function PostDetails() {
       reset();
       close();
       router.navigate('/me?posted=1');
+      offerAlerts(`We can tell you when a host approves your ${isEpisode ? 'episode' : 'Short'}, and when people comment on it. Change this any time in Me.`);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setPosting(false);

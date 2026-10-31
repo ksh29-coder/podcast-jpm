@@ -3,6 +3,7 @@ const express = require('express');
 const { authMiddleware } = require('./auth');
 const { connect, migrate } = require('./db');
 const { createActivity } = require('./activity');
+const { inBackground } = require('./background');
 const { createEngagement } = require('./engagement');
 const { openRouterAi } = require('./ai');
 const { openRouterTranscriber } = require('./transcribe');
@@ -12,6 +13,7 @@ const { assistantRouter } = require('./assistant');
 const { openAiVoice } = require('./voice');
 const { createStore } = require('./store');
 const { muxVideo } = require('./video');
+const { createPush } = require('./push');
 const { ffmpegEditor } = require('./edit');
 
 const MEDIA_DIR = path.join(__dirname, '..', 'public', 'media');
@@ -19,10 +21,12 @@ const MEDIA_DIR = path.join(__dirname, '..', 'public', 'media');
 // Express 4 doesn't catch rejected promises from handlers.
 const ah = (fn) => (req, res, next) => fn(req, res, next).catch(next);
 
-function createApp({ db = connect(), video = muxVideo(), ai = openRouterAi(), transcriber = openRouterTranscriber(), voice = openAiVoice(), editor = ffmpegEditor(), background, tint, mediaDir = MEDIA_DIR, auth = authMiddleware(), hostPasscode, cleanUpEveryMs } = {}) {
+function createApp({ db = connect(), video = muxVideo(), ai = openRouterAi(), transcriber = openRouterTranscriber(), voice = openAiVoice(), editor = ffmpegEditor(), background, tint, mediaDir = MEDIA_DIR, auth = authMiddleware(), hostPasscode, cleanUpEveryMs, sendPush } = {}) {
   const app = express();
   const store = createStore({ db, video, ai, transcriber, editor, ...(background && { background }), ...(tint && { tint }), ...(cleanUpEveryMs !== undefined && { cleanUpEveryMs }) });
-  const engagement = createEngagement({ db });
+  const later = background ?? inBackground;
+  const push = createPush({ db, ...(sendPush && { send: sendPush }) });
+  const engagement = createEngagement({ db, push, later });
   const activity = createActivity({ db });
 
   // Tables are created (and seeded) on first use, so a fresh database needs no
@@ -69,14 +73,19 @@ function createApp({ db = connect(), video = muxVideo(), ai = openRouterAi(), tr
   app.use('/media', express.static(mediaDir, { fallthrough: false }));
 
   app.use('/api', ensureDb);
-  app.use('/api/host', hostRouter({ store, engagement, baseUrl, passcode: hostPasscode, db }));
+  app.use('/api/host', hostRouter({ store, engagement, push, later, baseUrl, passcode: hostPasscode, db }));
   app.use('/api/items', engagement.router());
-  app.use('/api/me', meRouter({ store, engagement, activity, baseUrl }));
+  app.use('/api/me', meRouter({ store, engagement, activity, push, baseUrl }));
   app.use('/api/assistant', assistantRouter({ db, store, voice, baseUrl }));
 
   app.get(
     '/api/episodes',
-    ah(async (req, res) => res.json(await engagement.withStats('episode', await store.listEpisodes(baseUrl(req)), req.user.id)))
+    ah(async (req, res) => {
+      // Opening the app is a good moment to send alerts that are due.
+      const due = push.sweepSoon();
+      if (due) later(due);
+      res.json(await engagement.withStats('episode', await store.listEpisodes(baseUrl(req)), req.user.id));
+    })
   );
 
   app.get(
