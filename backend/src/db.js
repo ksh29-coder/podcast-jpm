@@ -141,7 +141,9 @@ create table if not exists views (
   primary key (item_type, item_id, user_id)
 );
 
--- Comments stay pending until a host approves them (like Spotify's).
+-- Comments go up straight away (status approved). A reported one goes back to
+-- pending, hidden until a host looks at it. Older comments may still be
+-- pending from when every comment waited for a host.
 create table if not exists comments (
   id text primary key,
   item_type text not null check (item_type in ('episode', 'short')),

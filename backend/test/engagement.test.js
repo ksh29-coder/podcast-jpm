@@ -66,20 +66,10 @@ test("can't like or comment on missing or unpublished items", async () => {
   await host('PATCH', '/episodes/ep002', { status: 'published' });
 });
 
-test('comments wait for a host to approve them', async () => {
+test('comments go up straight away, without waiting for a host', async () => {
   const posted = await alice('POST', '/api/items/episode/ep001/comments', { name: 'Alice', body: 'Great episode' });
   assert.strictEqual(posted.status, 201);
-  assert.strictEqual(posted.body.status, 'pending');
-
-  // Alice sees her own pending comment; Bob sees nothing yet.
-  assert.strictEqual((await alice('GET', '/api/items/episode/ep001/comments')).body.length, 1);
-  assert.strictEqual((await bob('GET', '/api/items/episode/ep001/comments')).body.length, 0);
-  assert.strictEqual((await bob('GET', '/api/episodes/ep001')).body.comments, 0);
-
-  const queue = (await host('GET', '/comments')).body;
-  const item = queue.find((c) => c.id === posted.body.id);
-  assert.strictEqual(item.itemTitle, 'Pair Programming with an AI Assistant');
-  assert.strictEqual((await host('PATCH', `/comments/${item.id}`, { status: 'approved' })).status, 204);
+  assert.strictEqual(posted.body.status, 'approved');
 
   const seen = (await bob('GET', '/api/items/episode/ep001/comments')).body;
   assert.deepStrictEqual(
@@ -87,7 +77,8 @@ test('comments wait for a host to approve them', async () => {
     [['Alice', 'Great episode', 'approved']]
   );
   assert.strictEqual((await bob('GET', '/api/episodes/ep001')).body.comments, 1);
-  assert.ok(!(await host('GET', '/comments')).body.some((c) => c.id === item.id));
+  // Nothing for the hosts to review.
+  assert.ok(!(await host('GET', '/comments')).body.some((c) => c.id === posted.body.id));
 });
 
 test('comment input is checked', async () => {
@@ -139,12 +130,12 @@ test('comments can be pinned to a moment, reported (hidden for review), and carr
   assert.strictEqual(c.atSec, 42);
   assert.match(c.authorKey, /^[0-9a-f]{16}$/);
   assert.strictEqual((await alice('POST', '/api/items/episode/ep001/comments', { name: 'A', body: 'x', atSec: -1 })).status, 400);
-  await host('PATCH', `/comments/${c.id}`, { status: 'approved' });
   assert.ok((await bob('GET', '/api/items/episode/ep001/comments')).body.some((x) => x.id === c.id));
 
   assert.strictEqual((await bob('POST', `/api/items/episode/ep001/comments/${c.id}/report`, { reason: 'Off topic' })).status, 204);
   assert.ok(!(await bob('GET', '/api/items/episode/ep001/comments')).body.some((x) => x.id === c.id), 'hidden once reported');
   const queued = (await host('GET', '/comments')).body.find((x) => x.id === c.id);
+  assert.strictEqual(queued.itemTitle, 'Pair Programming with an AI Assistant');
   assert.deepStrictEqual(queued.reports, ['Off topic']);
   assert.strictEqual((await bob('POST', '/api/items/episode/ep001/comments/cm_nope/report', {})).status, 404);
 

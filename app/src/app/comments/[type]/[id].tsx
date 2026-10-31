@@ -12,9 +12,9 @@ import { colors, radius, spacing, type as text } from '../../../theme';
 
 const REASONS = ['Spam', 'Offensive', 'Off topic', 'Other'];
 
-// Comments on an episode or Short. New comments wait for a host to approve
-// them; the writer sees theirs straight away, marked as waiting. Anyone can
-// report a comment (it's hidden for review) or block its author on their device.
+// Comments on an episode or Short. New comments go up straight away. Anyone
+// can report a comment (it's hidden until a host looks at it) or block its
+// author on their device.
 export default function CommentsScreen() {
   const { type, id } = useLocalSearchParams<{ type: ItemType; id: string }>();
   const insets = useSafeAreaInsets();
@@ -140,7 +140,7 @@ export default function CommentsScreen() {
             keyboardDismissMode="on-drag"
             alwaysBounceVertical
             ListEmptyComponent={
-              <Text style={styles.empty}>{error ? `Couldn't load comments: ${error}` : 'No comments yet. Comments appear once a host approves them.'}</Text>
+              <Text style={styles.empty}>{error ? `Couldn't load comments: ${error}` : 'No comments yet. Be the first.'}</Text>
             }
             ListFooterComponent={
               blocked.length > 0 ? (
@@ -177,7 +177,7 @@ export default function CommentsScreen() {
                   </Pressable>
                 )}
                 <Text style={styles.body}>{item.body}</Text>
-                {item.status === 'pending' && <Text style={styles.pending}>Only you can see this until a host approves it.</Text>}
+                {item.status === 'pending' && <Text style={styles.pending}>Only you can see this while a host looks at it.</Text>}
                 {menuFor === item.id && (
                   <View style={styles.menu}>
                     <Text style={styles.hint}>Report this comment as:</Text>

@@ -215,7 +215,8 @@ function hostRouter({ store, engagement, baseUrl, passcode, db }) {
 
   r.get('/shorts', ah(async (req, res) => res.json(await engagement.withStats('short', await store.hostShorts(baseUrl(req)), 'host'))));
 
-  // Comment review queue. Nothing a viewer writes is shown until approved.
+  // Comment review queue: reported comments, hidden until a host approves
+  // (shows it again) or rejects them.
   r.get(
     '/comments',
     ah(async (req, res) => res.json(await engagement.hostComments(['approved', 'rejected'].includes(req.query.status) ? req.query.status : 'pending')))

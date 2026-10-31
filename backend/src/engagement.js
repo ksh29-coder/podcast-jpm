@@ -78,8 +78,8 @@ function createEngagement({ db }) {
       })
     );
 
-    // Approved comments, plus this person's own pending ones so they can see
-    // what they wrote is waiting for review.
+    // Comments people can see, plus this person's own hidden ones (reported,
+    // waiting for a host) so they know why others can't.
     r.get(
       '/:type/:id/comments',
       ah(async (req, res) => {
@@ -110,8 +110,8 @@ function createEngagement({ db }) {
         }
         const commentId = `cm_${crypto.randomBytes(6).toString('hex')}`;
         const { rows } = await db.query(
-          `insert into comments (id, item_type, item_id, user_id, author_name, body, at_sec)
-           values ($1, $2, $3, $4, $5, $6, $7) returning id, author_name, body, status, created_at, at_sec, user_id, true as mine`,
+          `insert into comments (id, item_type, item_id, user_id, author_name, body, at_sec, status)
+           values ($1, $2, $3, $4, $5, $6, $7, 'approved') returning id, author_name, body, status, created_at, at_sec, user_id, true as mine`,
           [commentId, type, id, req.user.id, name, body, typeof at === 'number' ? Math.round(at) : null]
         );
         res.status(201).json(toComment(rows[0]));
