@@ -58,7 +58,7 @@ export default function HostHome() {
 
       {comments.length > 0 && (
         <>
-          <Text style={ui.section}>Comments to review ({comments.length})</Text>
+          <Text style={ui.section}>Reported comments ({comments.length})</Text>
           {comments.map((c) => (
             <CommentCard key={c.id} comment={c} busy={busyId === c.id} onReview={(s) => reviewComment(c.id, s)} />
           ))}

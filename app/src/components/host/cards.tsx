@@ -107,7 +107,7 @@ export function ReportsLine({ reports }: { reports?: string[] }) {
   );
 }
 
-// A comment waiting for review, with Approve and Reject.
+// A comment waiting for review (reported), with Approve and Reject.
 export function CommentCard({ comment: c, busy, onReview }: { comment: HostComment; busy: boolean; onReview: (status: 'approved' | 'rejected') => void }) {
   return (
     <View style={ui.card}>

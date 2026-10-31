@@ -26,8 +26,8 @@ export default function StudioReview() {
           ))}
         </View>
         <View style={styles.col}>
-          <Text style={[ui.section, { marginTop: 0 }]}>Comments to review ({comments.length})</Text>
-          <Text style={ui.hint}>Viewers only see comments you approve. Reported comments come back here, hidden.</Text>
+          <Text style={[ui.section, { marginTop: 0 }]}>Reported comments ({comments.length})</Text>
+          <Text style={ui.hint}>Comments go up straight away. Reported ones are hidden and wait here: approve to show it again, reject to keep it hidden.</Text>
           {comments.length === 0 && <Text style={[ui.hint, styles.empty]}>Nothing waiting.</Text>}
           {comments.map((c) => (
             <CommentCard key={c.id} comment={c} busy={busyId === c.id} onReview={(s) => reviewComment(c.id, s)} />
