@@ -157,6 +157,19 @@ create table if not exists comments (
 create index if not exists comments_item on comments (item_type, item_id, status);
 -- Optional moment in the episode the comment is about.
 alter table comments add column if not exists at_sec double precision;
+-- Replies, one level deep like YouTube: parent_id is the top-level comment
+-- of the thread, reply_to_id the comment answered (the parent, or a reply in
+-- it). Its author is the one told about the reply.
+alter table comments add column if not exists parent_id text references comments(id) on delete cascade;
+alter table comments add column if not exists reply_to_id text references comments(id) on delete set null;
+create index if not exists comments_reply_to on comments (reply_to_id);
+
+-- When each person last looked at their Activity (in Me); newer things are
+-- unread.
+create table if not exists activity_seen (
+  user_id text primary key,
+  seen_at timestamptz not null default now()
+);
 
 -- Reports of comments by viewers. A reported comment is hidden until a host
 -- looks at it again (approve to show it, reject to keep it hidden).

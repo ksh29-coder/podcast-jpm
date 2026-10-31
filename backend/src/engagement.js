@@ -85,10 +85,14 @@ function createEngagement({ db }) {
       ah(async (req, res) => {
         const { type, id } = req.params;
         await requirePublished(type, id);
+        // Replies come with the thread they're in (parentId), and the name
+        // they answer when that's another reply rather than the thread's start.
         const { rows } = await db.query(
-          `select id, author_name, body, status, created_at, at_sec, user_id, user_id = $3 as mine from comments
-           where item_type = $1 and item_id = $2 and (status = 'approved' or (status = 'pending' and user_id = $3))
-           order by created_at desc limit 200`,
+          `select c.id, c.author_name, c.body, c.status, c.created_at, c.at_sec, c.user_id, c.user_id = $3 as mine, c.parent_id,
+                  case when c.reply_to_id <> c.parent_id then t.author_name end as reply_to_name
+           from comments c left join comments t on t.id = c.reply_to_id
+           where c.item_type = $1 and c.item_id = $2 and (c.status = 'approved' or (c.status = 'pending' and c.user_id = $3))
+           order by c.created_at desc limit 500`,
           [type, id, req.user.id]
         );
         res.json(rows.map(toComment));
@@ -108,13 +112,27 @@ function createEngagement({ db }) {
         if (at !== undefined && at !== null && (typeof at !== 'number' || !Number.isFinite(at) || at < 0 || at > 24 * 3600)) {
           throw httpError(400, 'atSec must be a time in seconds');
         }
+        // A reply goes in the thread of the comment it answers.
+        let target = null;
+        if (req.body?.replyTo !== undefined && req.body?.replyTo !== null) {
+          if (typeof req.body.replyTo !== 'string') throw httpError(400, 'replyTo must be a comment id');
+          const found = await db.query(
+            "select id, parent_id, author_name from comments where id = $1 and item_type = $2 and item_id = $3 and status = 'approved'",
+            [req.body.replyTo, type, id]
+          );
+          target = found.rows[0];
+          if (!target) throw httpError(404, 'That comment isn’t there any more');
+        }
+        const parentId = target ? (target.parent_id ?? target.id) : null;
         const commentId = `cm_${crypto.randomBytes(6).toString('hex')}`;
         const { rows } = await db.query(
-          `insert into comments (id, item_type, item_id, user_id, author_name, body, at_sec, status)
-           values ($1, $2, $3, $4, $5, $6, $7, 'approved') returning id, author_name, body, status, created_at, at_sec, user_id, true as mine`,
-          [commentId, type, id, req.user.id, name, body, typeof at === 'number' ? Math.round(at) : null]
+          `insert into comments (id, item_type, item_id, user_id, author_name, body, at_sec, status, parent_id, reply_to_id)
+           values ($1, $2, $3, $4, $5, $6, $7, 'approved', $8, $9)
+           returning id, author_name, body, status, created_at, at_sec, user_id, true as mine, parent_id`,
+          [commentId, type, id, req.user.id, name, body, target ? null : typeof at === 'number' ? Math.round(at) : null, parentId, target?.id ?? null]
         );
-        res.status(201).json(toComment(rows[0]));
+        const replyToName = target && target.id !== parentId ? target.author_name : null;
+        res.status(201).json(toComment({ ...rows[0], reply_to_name: replyToName }));
       })
     );
 
@@ -192,6 +210,9 @@ function createEngagement({ db }) {
   return { router, withStats, hostComments, setCommentStatus };
 }
 
+// Lets a viewer block someone without learning who (or which device) they are.
+const authorKey = (userId) => crypto.createHash('sha256').update(`author:${userId}`).digest('hex').slice(0, 16);
+
 function toComment(r) {
   return {
     id: r.id,
@@ -200,10 +221,10 @@ function toComment(r) {
     status: r.status,
     createdAt: new Date(r.created_at).toISOString(),
     atSec: r.at_sec ?? null,
-    // Lets a viewer block someone without learning who (or which device) they are.
-    ...(r.user_id !== undefined && { authorKey: crypto.createHash('sha256').update(`author:${r.user_id}`).digest('hex').slice(0, 16) }),
+    ...(r.parent_id !== undefined && { parentId: r.parent_id ?? null, replyToName: r.reply_to_name ?? null }),
+    ...(r.user_id !== undefined && { authorKey: authorKey(r.user_id) }),
     ...(r.mine !== undefined && { mine: r.mine }),
   };
 }
 
-module.exports = { createEngagement };
+module.exports = { createEngagement, authorKey };

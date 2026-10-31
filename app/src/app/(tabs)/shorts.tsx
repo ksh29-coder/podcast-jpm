@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, useWindowDimensions, View, type ViewToken } from 'react-native';
-import { router, useFocusEffect, useIsFocused } from 'expo-router';
+import { router, useFocusEffect, useIsFocused, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ErrorState } from '../../components/ErrorState';
 import { Glass } from '../../components/Glass';
@@ -51,6 +51,29 @@ export default function ShortsScreen() {
     if (viewableItems[0]) setVisibleId((viewableItems[0].item as Short).id);
   });
 
+  // Opened at a particular Short (?id=, e.g. from Activity): go to it once,
+  // loading the feed again if it's newer than the feed (just approved).
+  const { id: openId } = useLocalSearchParams<{ id?: string }>();
+  const listRef = useRef<FlatList<Short>>(null);
+  const index = openId && data ? data.findIndex((s) => s.id === openId) : -1;
+  const reloaded = useRef<{ id: string; from: Short[] } | null>(null);
+  useEffect(() => {
+    if (!openId || !all) return;
+    if (index < 0) {
+      // Still not there once the feed has loaded again: give up on it.
+      if (reloaded.current?.id === openId) {
+        if (reloaded.current.from !== all) router.setParams({ id: undefined });
+        return;
+      }
+      reloaded.current = { id: openId, from: all };
+      reload();
+      return;
+    }
+    if (!height) return;
+    listRef.current?.scrollToIndex({ index, animated: false });
+    router.setParams({ id: undefined });
+  }, [openId, all, index, height, reload]);
+
   if (error && !data) return <ErrorState message={error} onRetry={reload} />;
   if (!data) return <ActivityIndicator style={{ flex: 1 }} color={colors.accent} />;
 
@@ -58,6 +81,7 @@ export default function ShortsScreen() {
     <View style={styles.screen} onLayout={(e) => setHeight(e.nativeEvent.layout.height)}>
       {height > 0 && (
         <FlatList
+          ref={listRef}
           data={data}
           keyExtractor={(s) => s.id}
           pagingEnabled

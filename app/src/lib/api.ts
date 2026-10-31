@@ -147,7 +147,30 @@ export type Comment = {
   atSec?: number | null;
   // Anonymous key for blocking this author on this device.
   authorKey?: string;
+  // A reply: the comment that starts its thread, and the name it answers
+  // when that's another reply in the thread.
+  parentId?: string | null;
+  replyToName?: string | null;
 };
+
+// Something in this person's Activity. reply/comment/like come from other
+// people (actorKey, for leaving out people they blocked); live/rejected are a
+// host's review of their post; episode is a new episode.
+export type ActivityItem = {
+  id: string;
+  kind: 'reply' | 'comment' | 'like' | 'live' | 'rejected' | 'episode';
+  itemType: ItemType;
+  itemId: string;
+  itemTitle: string;
+  at: string;
+  commentId?: string;
+  actorName?: string;
+  actorKey?: string;
+  body?: string;
+  note?: string | null;
+};
+// Things newer than seenAt are unread.
+export type Activity = { seenAt: string; items: ActivityItem[] };
 
 // speaker: 0, 1, 2… from speaker detection (null if unknown).
 export type Cue = { startSec: number; endSec: number; text: string; speaker?: number | null };
@@ -209,14 +232,17 @@ export const api = {
     request<Stats>(`/api/items/${type}/${id}/like`, { method: liked ? 'PUT' : 'DELETE' }),
   view: (type: ItemType, id: string) => request<void>(`/api/items/${type}/${id}/view`, { method: 'POST' }),
   comments: (type: ItemType, id: string) => request<Comment[]>(`/api/items/${type}/${id}/comments`),
-  postComment: (type: ItemType, id: string, name: string, body: string, atSec?: number) =>
-    request<Comment>(`/api/items/${type}/${id}/comments`, { method: 'POST', body: JSON.stringify({ name, body, atSec }) }),
+  // replyTo: the comment answered, for a reply.
+  postComment: (type: ItemType, id: string, name: string, body: string, extra?: { atSec?: number; replyTo?: string }) =>
+    request<Comment>(`/api/items/${type}/${id}/comments`, { method: 'POST', body: JSON.stringify({ name, body, ...extra }) }),
   // Report an episode or Short (one posted from the app or website is hidden until a host looks).
   reportItem: (type: ItemType, id: string, reason: string) =>
     request<void>(`/api/items/${type}/${id}/report`, { method: 'POST', body: JSON.stringify({ reason }) }),
   reportComment: (type: ItemType, id: string, commentId: string, reason: string) =>
     request<void>(`/api/items/${type}/${id}/comments/${commentId}/report`, { method: 'POST', body: JSON.stringify({ reason }) }),
   me: () => request<Profile>('/api/me'),
+  activity: () => request<Activity>('/api/me/activity'),
+  markActivitySeen: () => request<void>('/api/me/activity/seen', { method: 'POST' }),
   saveMe: (name: string, acceptGuidelines?: boolean) => request<Profile>('/api/me', { method: 'PUT', body: JSON.stringify({ name, acceptGuidelines }) }),
   // range: the part of a Short's video to keep, when not all of it.
   createUpload: (kind: PostKind, range?: { startSec: number; endSec: number }) =>

@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Image, Platform, Pressable, RefreshControl, StyleSheet, Text, TextInput, View } from 'react-native';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { ActivityList } from '../../../components/ActivityList';
 import { ErrorState } from '../../../components/ErrorState';
 import { Icon } from '../../../components/Icon';
 import { api, type MyEpisode, type MyShort, type Profile } from '../../../lib/api';
@@ -105,6 +106,7 @@ export default function MeScreen() {
               <Text style={[type.subhead, { flex: 1, color: colors.accentText }]}>Sent for review. It goes live once a host approves it.</Text>
             </Pressable>
           )}
+          <ActivityList />
           <NameCard profile={profile} onSaved={setProfile} />
           <Pressable style={styles.row} onPress={() => router.push('/downloads')} accessibilityRole="button">
             <Icon name="download" size={22} />
