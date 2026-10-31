@@ -172,6 +172,9 @@ export type ActivityItem = {
 // Things newer than seenAt are unread.
 export type Activity = { seenAt: string; items: ActivityItem[] };
 
+// Which kinds of phone alert this person gets (all on to start).
+export type AlertSettings = { replies: boolean; comments: boolean; reviews: boolean; episodes: boolean };
+
 // speaker: 0, 1, 2… from speaker detection (null if unknown).
 export type Cue = { startSec: number; endSec: number; text: string; speaker?: number | null };
 // 'generating' while captions are made (a few minutes after publishing);
@@ -243,6 +246,11 @@ export const api = {
   me: () => request<Profile>('/api/me'),
   activity: () => request<Activity>('/api/me/activity'),
   markActivitySeen: () => request<void>('/api/me/activity/seen', { method: 'POST' }),
+  // Phone alerts: this phone's push token, and which kinds to send.
+  savePushToken: (token: string) => request<void>('/api/me/push/token', { method: 'PUT', body: JSON.stringify({ token }) }),
+  pushSettings: () => request<AlertSettings>('/api/me/push/settings'),
+  savePushSettings: (changes: Partial<AlertSettings>) =>
+    request<AlertSettings>('/api/me/push/settings', { method: 'PUT', body: JSON.stringify(changes) }),
   saveMe: (name: string, acceptGuidelines?: boolean) => request<Profile>('/api/me', { method: 'PUT', body: JSON.stringify({ name, acceptGuidelines }) }),
   // range: the part of a Short's video to keep, when not all of it.
   createUpload: (kind: PostKind, range?: { startSec: number; endSec: number }) =>

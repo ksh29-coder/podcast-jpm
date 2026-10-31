@@ -106,7 +106,7 @@ function chapters(value) {
   }));
 }
 
-function hostRouter({ store, engagement, baseUrl, passcode, db }) {
+function hostRouter({ store, engagement, push, later, baseUrl, passcode, db }) {
   const r = express.Router();
   r.use(requireHost(passcode, db));
   const by = () => 'host';
@@ -180,6 +180,8 @@ function hostRouter({ store, engagement, baseUrl, passcode, db }) {
         publishAt: publishAt(b.publishAt, b.status),
       }, baseUrl(req));
       if (!found) throw httpError(404, 'Episode not found');
+      // Approving or turning it down may be news for its author, or everyone.
+      if (b.status && push) later(push.sweep());
       res.json(await store.getEpisode(req.params.id, baseUrl(req), { host: true }));
     })
   );
@@ -281,6 +283,8 @@ function hostRouter({ store, engagement, baseUrl, passcode, db }) {
         publishAt: publishAt(b.publishAt, b.status),
       });
       if (!found) throw httpError(404, 'Short not found');
+      // Approving or turning it down is news for its author.
+      if (b.status && push) later(push.sweep());
       const all = await store.hostShorts(baseUrl(req));
       res.json(all.find((s) => s.id === req.params.id));
     })

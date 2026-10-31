@@ -9,7 +9,7 @@ const { httpError } = require('./store');
 const TABLE = { episode: 'episodes', short: 'shorts' };
 const ah = (fn) => (req, res, next) => fn(req, res, next).catch(next);
 
-function createEngagement({ db }) {
+function createEngagement({ db, push, later }) {
   // Counts for many items at once, plus whether this user liked each.
   async function stats(type, ids, userId) {
     if (!ids.length) return new Map();
@@ -131,6 +131,8 @@ function createEngagement({ db }) {
            returning id, author_name, body, status, created_at, at_sec, user_id, true as mine, parent_id`,
           [commentId, type, id, req.user.id, name, body, target ? null : typeof at === 'number' ? Math.round(at) : null, parentId, target?.id ?? null]
         );
+        // Phone alerts for whoever it answers, or the post's author.
+        if (push) later(push.commentPosted(commentId));
         const replyToName = target && target.id !== parentId ? target.author_name : null;
         res.status(201).json(toComment({ ...rows[0], reply_to_name: replyToName }));
       })

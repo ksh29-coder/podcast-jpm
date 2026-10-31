@@ -12,7 +12,7 @@ const { cues, num, pictures, str, tags } = require('./validate');
 
 const ah = (fn) => (req, res, next) => fn(req, res, next).catch(next);
 
-function meRouter({ store, engagement, activity, baseUrl }) {
+function meRouter({ store, engagement, activity, push, baseUrl }) {
   const r = express.Router();
 
   // Without a device id everyone would share one "me".
@@ -22,6 +22,36 @@ function meRouter({ store, engagement, activity, baseUrl }) {
 
   // Activity: what happened around this person's comments and posts.
   r.get('/activity', ah(async (req, res) => res.json(await activity.list(req.user.id))));
+  // Phone alerts: this phone's Expo push token, and which kinds to send.
+  r.put(
+    '/push/token',
+    ah(async (req, res) => {
+      if (!(await push.register(req.user.id, req.body?.token))) throw httpError(400, 'token must be an Expo push token');
+      res.status(204).end();
+    })
+  );
+  r.delete(
+    '/push/token',
+    ah(async (req, res) => {
+      await push.unregister(req.user.id, String(req.body?.token ?? ''));
+      res.status(204).end();
+    })
+  );
+  r.get('/push/settings', ah(async (req, res) => res.json(await push.settings(req.user.id))));
+  r.put(
+    '/push/settings',
+    ah(async (req, res) => {
+      const b = req.body || {};
+      const changes = {};
+      for (const k of push.KINDS) {
+        if (b[k] === undefined) continue;
+        if (typeof b[k] !== 'boolean') throw httpError(400, `${k} must be true or false`);
+        changes[k] = b[k];
+      }
+      res.json(await push.saveSettings(req.user.id, changes));
+    })
+  );
+
   r.post(
     '/activity/seen',
     ah(async (req, res) => {

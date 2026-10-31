@@ -2,6 +2,7 @@ import { DarkTheme, Stack, ThemeProvider } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { PostProvider } from '../components/post/PostContext';
 import { Shell } from '../components/web/Shell';
+import { useAlerts } from '../lib/alerts';
 import { PlayerProvider } from '../lib/player';
 import { colors } from '../theme';
 
@@ -13,6 +14,8 @@ const navTheme = {
 };
 
 export default function RootLayout() {
+  // Phone alerts: sign this phone up, and open what a tapped alert is about.
+  useAlerts();
   return (
     <ThemeProvider value={navTheme}>
       <PlayerProvider>

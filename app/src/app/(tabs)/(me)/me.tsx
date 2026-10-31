@@ -2,6 +2,7 @@ import { useCallback, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Image, Platform, Pressable, RefreshControl, StyleSheet, Text, TextInput, View } from 'react-native';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { ActivityList } from '../../../components/ActivityList';
+import { AlertSettings } from '../../../components/AlertSettings';
 import { ErrorState } from '../../../components/ErrorState';
 import { Icon } from '../../../components/Icon';
 import { api, type MyEpisode, type MyShort, type Profile } from '../../../lib/api';
@@ -113,6 +114,7 @@ export default function MeScreen() {
             <Text style={[type.headline, { flex: 1 }]}>Downloads</Text>
             <Icon name="chevronRight" size={16} color={colors.textMuted} />
           </Pressable>
+          <AlertSettings />
           {blocked.length > 0 && (
             <Pressable style={styles.row} onPress={() => unblockAll()} accessibilityRole="button" accessibilityHint="Shows their posts and comments again">
               <Icon name="eyeSlash" size={22} />

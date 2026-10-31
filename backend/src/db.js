@@ -171,6 +171,28 @@ create table if not exists activity_seen (
   seen_at timestamptz not null default now()
 );
 
+-- Phone alerts (Expo push). Each phone's token, who it belongs to, which
+-- kinds of alert they want (all on until they turn one off), and alerts
+-- already sent, so each goes once and comment alerts at most every few minutes.
+create table if not exists push_tokens (
+  token text primary key,
+  user_id text not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists push_tokens_user on push_tokens (user_id);
+create table if not exists push_settings (
+  user_id text primary key,
+  replies boolean not null default true,
+  comments boolean not null default true,
+  reviews boolean not null default true,
+  episodes boolean not null default true
+);
+create table if not exists push_sent (
+  key text primary key,
+  sent_at timestamptz not null default now()
+);
+
 -- Reports of comments by viewers. A reported comment is hidden until a host
 -- looks at it again (approve to show it, reject to keep it hidden).
 create table if not exists comment_reports (
