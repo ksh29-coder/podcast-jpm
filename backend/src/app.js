@@ -2,6 +2,7 @@ const path = require('path');
 const express = require('express');
 const { authMiddleware } = require('./auth');
 const { connect, migrate } = require('./db');
+const { createActivity } = require('./activity');
 const { createEngagement } = require('./engagement');
 const { openRouterAi } = require('./ai');
 const { openRouterTranscriber } = require('./transcribe');
@@ -22,6 +23,7 @@ function createApp({ db = connect(), video = muxVideo(), ai = openRouterAi(), tr
   const app = express();
   const store = createStore({ db, video, ai, transcriber, editor, ...(background && { background }), ...(tint && { tint }), ...(cleanUpEveryMs !== undefined && { cleanUpEveryMs }) });
   const engagement = createEngagement({ db });
+  const activity = createActivity({ db });
 
   // Tables are created (and seeded) on first use, so a fresh database needs no
   // separate setup step. Retried on the next request if it fails.
@@ -69,7 +71,7 @@ function createApp({ db = connect(), video = muxVideo(), ai = openRouterAi(), tr
   app.use('/api', ensureDb);
   app.use('/api/host', hostRouter({ store, engagement, baseUrl, passcode: hostPasscode, db }));
   app.use('/api/items', engagement.router());
-  app.use('/api/me', meRouter({ store, engagement, baseUrl }));
+  app.use('/api/me', meRouter({ store, engagement, activity, baseUrl }));
   app.use('/api/assistant', assistantRouter({ db, store, voice, baseUrl }));
 
   app.get(

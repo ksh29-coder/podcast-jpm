@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { Image, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { router, usePathname } from 'expo-router';
+import { useActivity, useActivityUpdates } from '../../lib/activity';
 import { formatTime } from '../../lib/format';
 import { usePlayer } from '../../lib/player';
 import { colors, radius, spacing, type } from '../../theme';
@@ -33,9 +34,12 @@ export function Shell({ children }: { children: ReactNode }) {
   // lose where the visitor is.
   const bare = path.startsWith('/host') || path.startsWith('/post') || path.startsWith('/assistant');
   const wide = width >= WIDE;
+  useActivityUpdates();
+  // New replies, comments, reviews and episodes, counted on Me.
+  const { unread } = useActivity();
   return (
     <View style={[styles.root, { flexDirection: wide ? 'row' : 'column' }]}>
-      {wide && !bare && <Sidebar path={path} />}
+      {wide && !bare && <Sidebar path={path} unread={unread} />}
       <View style={styles.main}>
         {!bare && DETAIL.test(path) && (
           <View style={styles.topBar}>
@@ -59,7 +63,10 @@ export function Shell({ children }: { children: ReactNode }) {
             const on = t.match(path);
             return (
               <Pressable key={t.href} onPress={() => router.navigate(t.href)} style={styles.bottomItem} accessibilityRole="link" accessibilityState={{ selected: on }}>
-                <Icon name={t.icon} size={22} color={on ? colors.text : colors.textMuted} />
+                <View>
+                  <Icon name={t.icon} size={22} color={on ? colors.text : colors.textMuted} />
+                  {t.href === '/me' && <Badge count={unread} style={styles.badgeOnIcon} />}
+                </View>
                 <Text style={[type.caption, { color: on ? colors.text : colors.textMuted, fontWeight: '700' }]}>{t.label}</Text>
               </Pressable>
             );
@@ -70,7 +77,7 @@ export function Shell({ children }: { children: ReactNode }) {
   );
 }
 
-function Sidebar({ path }: { path: string }) {
+function Sidebar({ path, unread }: { path: string; unread: number }) {
   return (
     <View style={styles.sidebar}>
       <Pressable onPress={() => router.navigate('/')} style={styles.brand} accessibilityRole="link" accessibilityLabel="AI Wave home">
@@ -93,7 +100,8 @@ function Sidebar({ path }: { path: string }) {
               accessibilityState={{ selected: on }}
             >
               <Icon name={t.icon} size={20} color={on ? colors.text : colors.textMuted} />
-              <Text style={[styles.itemText, !on && { color: colors.textMuted }]}>{t.label}</Text>
+              <Text style={[styles.itemText, !on && { color: colors.textMuted }, { flex: 1 }]}>{t.label}</Text>
+              {t.href === '/me' && <Badge count={unread} />}
             </Pressable>
           );
         })}
@@ -103,6 +111,16 @@ function Sidebar({ path }: { path: string }) {
         <Icon name="shield" size={20} color={colors.textMuted} />
         <Text style={[styles.itemText, { color: colors.textMuted }]}>Host Studio</Text>
       </Pressable>
+    </View>
+  );
+}
+
+// The red count of unread Activity.
+function Badge({ count, style }: { count: number; style?: object }) {
+  if (!count) return null;
+  return (
+    <View style={[styles.badge, style]} accessibilityLabel={`${count} new`}>
+      <Text style={styles.badgeText}>{count > 99 ? '99+' : count}</Text>
     </View>
   );
 }
@@ -172,6 +190,9 @@ const styles = StyleSheet.create({
   itemHover: { backgroundColor: colors.card },
   itemActive: { backgroundColor: colors.cardHigh },
   itemText: { ...type.subhead, color: colors.text, fontWeight: '700' },
+  badge: { minWidth: 18, height: 18, paddingHorizontal: 5, borderRadius: 9, backgroundColor: '#FF3B30', alignItems: 'center', justifyContent: 'center' },
+  badgeText: { color: '#fff', fontSize: 11, fontWeight: '800' },
+  badgeOnIcon: { position: 'absolute', top: -6, right: -10 },
   divider: { height: StyleSheet.hairlineWidth, backgroundColor: colors.border, marginHorizontal: spacing.sm },
   bottomBar: { flexDirection: 'row', justifyContent: 'space-around', paddingVertical: spacing.sm, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border, backgroundColor: '#0D0C12' },
   bottomItem: { alignItems: 'center', gap: 2, paddingHorizontal: spacing.md },

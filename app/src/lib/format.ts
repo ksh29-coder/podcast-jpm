@@ -15,6 +15,16 @@ export function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
+// "now", "5m", "3h", "2d", then the date: how long ago, in a short list.
+export function formatAgo(iso: string): string {
+  const min = Math.floor((Date.now() - new Date(iso).getTime()) / 60_000);
+  if (min < 1) return 'now';
+  if (min < 60) return `${min}m`;
+  if (min < 24 * 60) return `${Math.floor(min / 60)}h`;
+  if (min < 7 * 24 * 60) return `${Math.floor(min / (24 * 60))}d`;
+  return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
 // "1:02:03", "2:05" or "75" to seconds; null if it isn't a time.
 export function parseTime(text: string): number | null {
   const parts = text.trim().split(':');

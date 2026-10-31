@@ -12,13 +12,23 @@ const { cues, num, pictures, str, tags } = require('./validate');
 
 const ah = (fn) => (req, res, next) => fn(req, res, next).catch(next);
 
-function meRouter({ store, engagement, baseUrl }) {
+function meRouter({ store, engagement, activity, baseUrl }) {
   const r = express.Router();
 
   // Without a device id everyone would share one "me".
   r.use((req, res, next) => (req.user.id === 'dev-user' ? next(httpError(400, 'This app version can’t post Shorts yet')) : next()));
 
   r.get('/', ah(async (req, res) => res.json(await store.profile(req.user.id))));
+
+  // Activity: what happened around this person's comments and posts.
+  r.get('/activity', ah(async (req, res) => res.json(await activity.list(req.user.id))));
+  r.post(
+    '/activity/seen',
+    ah(async (req, res) => {
+      await activity.markSeen(req.user.id);
+      res.status(204).end();
+    })
+  );
 
   r.put(
     '/',
