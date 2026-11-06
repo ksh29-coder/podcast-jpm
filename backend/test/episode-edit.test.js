@@ -21,7 +21,12 @@ let db;
 
 const renders = [];
 let silencesCalls = 0;
+let activityCalls = 0;
 const engine = {
+  // Recordings stay links here (the real engine downloads them).
+  async downloadAll(paths) {
+    return paths;
+  },
   async probe(url) {
     return { durationSec: 120, width: 1280, height: 720, fps: 25, hasAudio: true, url };
   },
@@ -29,6 +34,10 @@ const engine = {
     renders.push({ plan, opts });
     await fs.writeFile(opts.out, 'video');
     return { out: opts.out };
+  },
+  async activity(url) {
+    activityCalls++;
+    return { blank: [{ from: 0, to: 2 }], changes: [5, 40], url };
   },
   async silences(url) {
     silencesCalls++;
@@ -233,6 +242,50 @@ test('with the real ffmpeg, the edit is made from the original and sent to the v
   const info = spawnSync(ffmpeg, ['-hide_banner', '-i', sent]).stderr.toString();
   assert.match(info, /Duration: 00:00:50/, '120 seconds less 30 and 40');
   assert.match(info, /Audio: aac/);
+});
+
+test('a screen recording joins the edit: lined up, shown in layouts, zoomed, and made with the episode', async () => {
+  const ep = await newEpisode();
+  const { videoId } = (await host('POST', '/uploads', { kind: 'screen' })).body;
+  assert.deepStrictEqual(video.state.calls.filter(([n]) => n === 'createUpload').at(-1)[1], { audio: false, captions: false });
+
+  const bad = await host('PUT', `/episodes/${ep.id}/edit/sources/speaker`, { videoId });
+  assert.match(bad.body.error, /main recording/);
+  const added = await host('PUT', `/episodes/${ep.id}/edit/sources/screen`, { videoId, offsetSec: 3 });
+  assert.strictEqual(added.status, 200);
+  assert.deepStrictEqual(added.body.plan.sources.screen, { video: `video:${videoId}`, durationSec: 120, width: 1920, height: 1080, offsetSec: 3 });
+
+  const edit = (await host('GET', `/episodes/${ep.id}/edit`)).body;
+  assert.match(edit.sources.screen.url, /^https:\/\/stream\.test\/play-asset\d+\.m3u8$/);
+  assert.strictEqual(edit.sources.screen.offsetSec, 3);
+
+  // Blank stretches and picture changes, on the original's clock; found once.
+  const before = activityCalls;
+  const act = (await host('GET', `/episodes/${ep.id}/edit/sources/screen/activity`)).body;
+  assert.deepStrictEqual(act, { blank: [{ from: 3, to: 5 }], changes: [8, 43] });
+  await host('GET', `/episodes/${ep.id}/edit/sources/screen/activity`);
+  assert.strictEqual(activityCalls, before + 1);
+
+  const saved = await host('PUT', `/episodes/${ep.id}/edit`, {
+    plan: { scenes: [{ from: 10, to: 50, layout: 'screen+speaker', pip: 'top-right' }], zooms: [{ from: 20, to: 30, source: 'screen', rect: [0.5, 0, 0.5, 0.5] }] },
+  });
+  assert.strictEqual(saved.status, 200, JSON.stringify(saved.body));
+  assert.strictEqual(saved.body.plan.scenes[0].source, undefined, 'the default screen source is fine');
+  assert.strictEqual((await host('PUT', `/episodes/${ep.id}/edit`, { plan: { scenes: [{ from: 1, to: 2, layout: 'screen', source: 'camera' }] } })).status, 400);
+
+  await host('POST', `/episodes/${ep.id}/edit/make`);
+  await made(ep.id);
+  const render = renders.at(-1);
+  assert.match(render.opts.paths.screen, /^https:\/\/download\.test\/asset\d+\.mp4$/);
+  assert.deepStrictEqual([render.plan.sources.screen.width, render.plan.sources.screen.height, render.plan.sources.screen.offsetSec], [1280, 720, 3], 'its real size, read from the file');
+  assert.strictEqual(render.plan.scenes.length, 1);
+
+  // Taking it out takes its layouts and zooms with it, and deletes it.
+  const screenAsset = (await db.query('select asset_id from videos where id = $1', [videoId])).rows[0].asset_id;
+  const removed = await host('DELETE', `/episodes/${ep.id}/edit/sources/screen`);
+  assert.deepStrictEqual([removed.body.plan.sources, removed.body.plan.scenes, removed.body.plan.zooms], [{}, [], []]);
+  assert.ok(video.state.calls.some(([n, id]) => n === 'deleteAsset' && id === screenAsset));
+  assert.strictEqual((await db.query('select count(*)::int as n from videos where id = $1', [videoId])).rows[0].n, 0);
 });
 
 test('times move between versions of an edit, and transcripts are rebuilt by word', () => {

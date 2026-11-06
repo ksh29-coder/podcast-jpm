@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { router } from 'expo-router';
-import type { EditPlan, EditText, EpisodeEdit, Pause, TextStyleName } from '../../lib/host';
-import { clock, editedLength, findFillers, keptSegments, newId, playableFrom, shortenPauses, TEXT_STYLES, withItem, type Range } from '../../lib/edit';
+import * as UpChunk from '@mux/upchunk';
+import type { EditPlan, EditScene, EditText, EditZoom, EpisodeEdit, Layout, Pause, TextStyleName } from '../../lib/host';
+import { clock, editedLength, findFillers, keptSegments, newId, placeRange, playableFrom, sharedRanges, shortenPauses, TEXT_STYLES, withItem, zoomRect, type Range } from '../../lib/edit';
 import { colors } from '../../theme';
 import { useHost } from './HostGate';
 import { ui } from './ui';
-import { Preview } from './editor/Preview.web';
-import { Timeline } from './editor/Timeline.web';
+import { Preview, type Drawn } from './editor/Preview.web';
+import { LAYOUT_COLOR, Timeline } from './editor/Timeline.web';
+import { useVideoState } from './useVideoState';
 import { Transcript } from './editor/Transcript.web';
 
 // Web: edit an episode's video. Cuts (by time, by selecting words in the
@@ -31,7 +33,7 @@ export function VideoEditor({ episodeId }: { episodeId: string }) {
 }
 
 type Save = 'saved' | 'saving' | 'unsaved' | { error: string };
-type Tab = 'cuts' | 'text' | 'find';
+type Tab = 'cuts' | 'text' | 'find' | 'screen';
 
 function Editor({ episodeId, initial }: { episodeId: string; initial: EpisodeEdit }) {
   const { api } = useHost();
@@ -62,6 +64,23 @@ function Editor({ episodeId, initial }: { episodeId: string; initial: EpisodeEdi
   const [save, setSave] = useState<Save>('saved');
   const [warnings, setWarnings] = useState<string[]>([]);
   const [makeError, setMakeError] = useState<string | null>(null);
+  const [sources, setSources] = useState(initial.sources);
+  // Drawing a zoom area on the screen share (for the range in `drawing`).
+  const [drawing, setDrawing] = useState<Range | null>(null);
+  const screen = sources.screen?.url ? { url: sources.screen.url, offsetSec: sources.screen.offsetSec, durationSec: sources.screen.durationSec } : null;
+  const scene = plan.scenes.find((sc) => now >= sc.from && now < sc.to) ?? null;
+
+  // The server changed the plan's recordings (and what used them).
+  const fromServer = useCallback(async (p: EditPlan) => {
+    setHistory((h) => ({ ...h, plan: { ...h.plan, sources: p.sources, scenes: p.scenes, zooms: p.zooms } }));
+    setSources((await api.episodeEdit(episodeId)).sources);
+  }, [api, episodeId]);
+  const onDraw = (drawn: Drawn) => {
+    if (!drawing || drawn.w < 0.03 || drawn.h < 0.03) return setDrawing(null);
+    const zoom: EditZoom = { id: newId('zoom'), from: drawing.from, to: drawing.to, source: 'screen', rect: zoomRect(drawn) };
+    change((p) => ({ ...p, zooms: placeRange(p.zooms, zoom) }));
+    setDrawing(null);
+  };
 
   const segments = useMemo(() => keptSegments(plan.cuts, duration), [plan.cuts, duration]);
   const length = editedLength(segments);
@@ -178,7 +197,10 @@ function Editor({ episodeId, initial }: { episodeId: string; initial: EpisodeEdi
       else if (e.key === 'x' || e.key === 'Backspace' || e.key === 'Delete') cutSelection();
       else if (e.key === 'ArrowLeft') seek(t - 5);
       else if (e.key === 'ArrowRight') seek(t + 5);
-      else if (e.key === 'Escape') setSelection(null);
+      else if (e.key === 'Escape') {
+        setSelection(null);
+        setDrawing(null);
+      }
       else return;
       e.preventDefault();
     };
@@ -192,16 +214,21 @@ function Editor({ episodeId, initial }: { episodeId: string; initial: EpisodeEdi
       {locked && <Text style={[ui.card, ui.hint, { color: colors.highlight }]}>{locked}</Text>}
 
       <View style={{ flexDirection: 'row', gap: 16, flexWrap: 'wrap' }}>
-        <View style={{ flex: 3, minWidth: 420, gap: 10 }}>
+        <View nativeID="editor-preview" style={{ flex: 3, minWidth: 420, gap: 10 }}>
           <Preview
             videoRef={videoRef}
             url={initial.videoUrl!}
             poster={initial.posterUrl}
             texts={plan.texts}
+            screen={screen}
+            scene={scene}
+            zooms={plan.zooms}
             now={now}
+            drawing={!!drawing}
+            onDraw={onDraw}
             onTime={setNow}
-            onAspect={() => {}}
           />
+          {drawing && <Text style={[ui.hint, { color: colors.highlight }]}>Drag over the screen to mark the area to zoom into ({clock(drawing.from)}–{clock(drawing.to)}). Esc to stop.</Text>}
           <View style={[ui.row, { justifyContent: 'space-between' }]}>
             <View style={ui.row}>
               <Button label={playing ? 'Pause' : 'Play'} onPress={toggle} primary />
@@ -222,7 +249,7 @@ function Editor({ episodeId, initial }: { episodeId: string; initial: EpisodeEdi
         </View>
       </View>
 
-      <Timeline durationSec={duration} cuts={plan.cuts} texts={plan.texts} selection={selection} now={now} onSeek={seek} onSelect={setSelection} />
+      <Timeline durationSec={duration} cuts={plan.cuts} texts={plan.texts} scenes={plan.scenes} zooms={plan.zooms} selection={selection} now={now} onSeek={seek} onSelect={setSelection} />
 
       <View style={[ui.row, { justifyContent: 'space-between' }]}>
         <View style={ui.row}>
@@ -239,12 +266,33 @@ function Editor({ episodeId, initial }: { episodeId: string; initial: EpisodeEdi
 
       <View style={[ui.card, { gap: 10 }]}>
         <View style={ui.row}>
-          {(['cuts', 'text', 'find'] as Tab[]).map((t) => (
-            <Toggle key={t} on={tab === t} onPress={() => setTab(t)} label={{ cuts: `Cuts (${plan.cuts.length})`, text: `Text on screen (${plan.texts.length})`, find: 'Find things to cut' }[t]} />
+          {(['cuts', 'text', 'find', 'screen'] as Tab[]).map((t) => (
+            <Toggle key={t} on={tab === t} onPress={() => setTab(t)} label={{ cuts: `Cuts (${plan.cuts.length})`, text: `Text on screen (${plan.texts.length})`, find: 'Find things to cut', screen: 'Screen share & layouts' }[t]} />
           ))}
         </View>
         {tab === 'cuts' && <CutsPanel plan={plan} change={change} seek={seek} locked={!!locked} />}
         {tab === 'text' && <TextPanel plan={plan} change={change} now={now} seek={seek} locked={!!locked} />}
+        {tab === 'screen' && (
+          <ScreenPanel
+            episodeId={episodeId}
+            plan={plan}
+            change={change}
+            source={sources.screen ?? null}
+            fromServer={fromServer}
+            selection={selection}
+            now={now}
+            duration={duration}
+            seek={seek}
+            onDrawZoom={(r) => {
+              setDrawing(r);
+              // The screen to draw on is at the top of the page.
+              document.getElementById('editor-preview')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              // Show the screen as it is then, once zoomed in.
+              seek(r.from + Math.min(1, (r.to - r.from) / 2));
+            }}
+            locked={!!locked}
+          />
+        )}
         {tab === 'find' && <FindPanel episodeId={episodeId} words={initial.transcript.words} segments={segments} initialPauses={initial.pauses} addCuts={addCuts} seek={seek} locked={!!locked} />}
       </View>
 
@@ -502,6 +550,192 @@ function FindPanel({ episodeId, words, segments, initialPauses, addCuts, seek, l
         )}
         {pauseError && <Text style={ui.error}>{pauseError}</Text>}
       </View>
+    </View>
+  );
+}
+
+const LAYOUT_LABEL: Record<Layout, string> = { speaker: 'Speaker', screen: 'Screen', 'screen+speaker': 'Screen + speaker in a corner', 'side-by-side': 'Side by side' };
+const CORNERS = ['bottom-right', 'bottom-left', 'top-right', 'top-left'] as const;
+
+// The screen recording (uploaded here, lined up with the original), what
+// fills the picture when (layouts), and zooms into the screen.
+function ScreenPanel({ episodeId, plan, change, source, fromServer, selection, now, duration, seek, onDrawZoom, locked }: {
+  episodeId: string;
+  plan: EditPlan;
+  change: (f: (p: EditPlan) => EditPlan) => void;
+  source: EpisodeEdit['sources'][string] | null;
+  fromServer: (p: EditPlan) => Promise<void>;
+  selection: Range | null;
+  now: number;
+  duration: number;
+  seek: (t: number) => void;
+  onDrawZoom: (range: Range) => void;
+  locked: boolean;
+}) {
+  const { api } = useHost();
+  const [videoId, setVideoId] = useState<string | null>(null);
+  const [percent, setPercent] = useState<number | null>(null);
+  const [uploaded, setUploaded] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [offset, setOffset] = useState(String(source?.offsetSec ?? 0));
+  const [layout, setLayout] = useState<Layout>('screen+speaker');
+  const [corner, setCorner] = useState<(typeof CORNERS)[number]>('bottom-right');
+  const [finding, setFinding] = useState(false);
+  const upload = useRef<UpChunk.UpChunk | null>(null);
+  const { state: video, ready } = useVideoState(api, videoId, { uploaded });
+  useEffect(() => () => upload.current?.abort(), []);
+
+  // Once the new recording is processed, it joins the edit.
+  useEffect(() => {
+    if (!ready || !videoId) return;
+    api.setEditSource(episodeId, 'screen', { videoId, offsetSec: 0 }).then(
+      async (res) => {
+        await fromServer(res.plan);
+        setVideoId(null);
+        setPercent(null);
+        setUploaded(false);
+        setOffset('0');
+      },
+      (e) => setError(e instanceof Error ? e.message : String(e))
+    );
+  }, [ready, videoId, api, episodeId, fromServer]);
+
+  const start = async (file: File) => {
+    setError(null);
+    setPercent(0);
+    try {
+      const { videoId: id, uploadUrl } = await api.createUpload('screen');
+      setVideoId(id);
+      const up = UpChunk.createUpload({ endpoint: uploadUrl, file, chunkSize: 30720 });
+      upload.current = up;
+      up.on('progress', (e) => setPercent(Math.round(e.detail as number)));
+      up.on('success', () => setUploaded(true));
+      up.on('error', (e) => setError((e.detail as { message?: string })?.message || 'Upload failed'));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setPercent(null);
+    }
+  };
+
+  const range = selection && selection.to - selection.from >= 1 ? selection : { from: now, to: Math.min(now + 30, duration) };
+  const addScene = (r: Range, how: Layout, reason?: string) => {
+    const item: EditScene = { id: newId('scene'), from: r.from, to: r.to, layout: how, ...(how === 'screen+speaker' && corner !== 'bottom-right' ? { pip: corner } : {}), ...(reason ? { reason } : {}) };
+    change((p) => ({ ...p, scenes: placeRange(p.scenes, item) }));
+  };
+  const whenShared = async () => {
+    if (!source) return;
+    setFinding(true);
+    setError(null);
+    try {
+      const { blank } = await api.sourceActivity(episodeId, 'screen');
+      const ranges = sharedRanges(blank, source.offsetSec, source.durationSec).map((r) => ({ from: r.from, to: Math.min(r.to, duration) }));
+      if (!ranges.length) setError('The screen recording looks blank throughout.');
+      change((p) => ({ ...p, scenes: ranges.reduce((list, r) => placeRange(list, { id: newId('scene'), ...r, layout, ...(layout === 'screen+speaker' && corner !== 'bottom-right' ? { pip: corner } : {}), reason: 'screen shared' } as EditScene), p.scenes) }));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setFinding(false);
+    }
+  };
+
+  if (!source) {
+    return (
+      <View style={{ gap: 8 }}>
+        <Text style={ui.hint}>
+          Add the screen recording to show it with the speaker: Zoom’s “shared screen” recording, or any screen recording of the same conversation. Zoom’s files start at the
+          same moment, so they line up by themselves.
+        </Text>
+        <input
+          type="file"
+          accept="video/mp4,video/quicktime,video/*"
+          disabled={locked || percent !== null}
+          onChange={(e) => {
+            const picked = e.target.files?.[0];
+            if (picked) start(picked);
+          }}
+          style={{ color: colors.text }}
+        />
+        {percent !== null && <Text style={ui.hint}>{!uploaded ? `Uploading: ${percent}%` : video?.status === 'errored' ? `Processing failed: ${video.error}` : 'Uploaded. Processing…'}</Text>}
+        {error && <Text style={ui.error}>{error}</Text>}
+      </View>
+    );
+  }
+
+  const scenes = [...plan.scenes].sort((a, b) => a.from - b.from);
+  const zooms = [...plan.zooms].sort((a, b) => a.from - b.from);
+  return (
+    <View style={{ gap: 14 }}>
+      <View style={[ui.row]}>
+        <Text style={ui.hint}>Screen recording · {clock(source.durationSec)} · starts</Text>
+        <TextInput style={[ui.input, { width: 80, paddingVertical: 6 }]} value={offset} onChangeText={setOffset} inputMode="decimal" accessibilityLabel="Seconds into the episode the screen recording starts" />
+        <Text style={ui.hint}>seconds into the episode</Text>
+        <Button
+          label="Line up"
+          disabled={locked || !Number.isFinite(Number(offset)) || Number(offset) === source.offsetSec}
+          onPress={() => api.setEditSource(episodeId, 'screen', { videoId: source.videoId, offsetSec: Number(offset) }).then((r) => fromServer(r.plan), (e) => setError(String(e?.message ?? e)))}
+        />
+        <Button label="Remove recording" disabled={locked} onPress={() => api.removeEditSource(episodeId, 'screen').then((r) => fromServer(r.plan), (e) => setError(String(e?.message ?? e)))} />
+      </View>
+
+      <View style={{ gap: 6 }}>
+        <Text style={ui.label}>What fills the picture</Text>
+        <View style={ui.row}>
+          {(['screen+speaker', 'screen', 'side-by-side', 'speaker'] as Layout[]).map((l) => (
+            <Toggle key={l} on={layout === l} onPress={() => setLayout(l)} label={LAYOUT_LABEL[l]} />
+          ))}
+        </View>
+        {layout === 'screen+speaker' && (
+          <View style={ui.row}>
+            <Text style={ui.hint}>Speaker in the</Text>
+            {CORNERS.map((c) => (
+              <Toggle key={c} on={corner === c} onPress={() => setCorner(c)} label={c.replace('-', ' ')} />
+            ))}
+          </View>
+        )}
+        <View style={ui.row}>
+          <Button label={`${selection ? 'Use for the selection' : 'Use from here for 30s'} (${clock(range.from)}–${clock(range.to)})`} primary onPress={() => addScene(range, layout)} disabled={locked} />
+          <Button label={finding ? 'Looking…' : 'Use whenever the screen is shared'} onPress={whenShared} disabled={locked || finding} />
+        </View>
+        <Text style={ui.hint}>Outside these, the speaker fills the picture.</Text>
+        {scenes.map((sc) => (
+          <ItemRow key={sc.id} suggested={sc.state === 'suggested'}>
+            <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: LAYOUT_COLOR[sc.layout] }} />
+            <Text style={{ color: colors.text, fontVariant: ['tabular-nums'], minWidth: 150 }}>
+              {clock(sc.from)} – {clock(sc.to)}
+            </Text>
+            <Text style={{ color: colors.text, flex: 1 }} numberOfLines={1}>
+              {LAYOUT_LABEL[sc.layout]}
+              {sc.pip ? <Text style={{ color: colors.textMuted }}> · {sc.pip.replace('-', ' ')}</Text> : null}
+              {sc.reason ? <Text style={{ color: colors.textMuted }}> · {sc.reason}</Text> : null}
+            </Text>
+            <Button label="Play" onPress={() => seek(sc.from)} />
+            <Button label="Remove" onPress={() => change((p) => ({ ...p, scenes: p.scenes.filter((x) => x.id !== sc.id) }))} disabled={locked} />
+          </ItemRow>
+        ))}
+      </View>
+
+      <View style={{ gap: 6 }}>
+        <Text style={ui.label}>Zoom into the screen</Text>
+        <Text style={ui.hint}>For small text or code: pick the time (select it, or from here for 10 seconds), then draw the area on the screen. Shows when the screen is in the picture.</Text>
+        <View style={ui.row}>
+          <Button
+            label={`Draw zoom area (${clock(selection ? selection.from : now)}–${clock(selection ? selection.to : Math.min(now + 10, duration))})`}
+            onPress={() => onDrawZoom(selection ?? { from: now, to: Math.min(now + 10, duration) })}
+            disabled={locked}
+          />
+        </View>
+        {zooms.map((z) => (
+          <ItemRow key={z.id} suggested={z.state === 'suggested'}>
+            <Text style={{ color: colors.text, fontVariant: ['tabular-nums'], minWidth: 150 }}>
+              {clock(z.from)} – {clock(z.to)}
+            </Text>
+            <Text style={[ui.hint, { flex: 1 }]}>{(1 / Math.max(z.rect[2], z.rect[3])).toFixed(1)}× zoom</Text>
+            <Button label="Play" onPress={() => seek(Math.max(0, z.from - 1))} />
+            <Button label="Remove" onPress={() => change((p) => ({ ...p, zooms: p.zooms.filter((x) => x.id !== z.id) }))} disabled={locked} />
+          </ItemRow>
+        ))}
+      </View>
+      {error && <Text style={ui.error}>{error}</Text>}
     </View>
   );
 }

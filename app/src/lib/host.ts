@@ -115,7 +115,10 @@ export type EpisodeEdit = {
     speakers: Record<string, string>;
   };
   pauses: Pause[] | null;
+  // Other recordings (like the screen share), to play beside the original.
+  sources: Record<string, { videoId: string; url: string | null; offsetSec: number; durationSec: number }>;
 };
+export type Activity = { blank: { from: number; to: number }[]; changes: number[] };
 
 export const MAX_SHORT_SEC = 90;
 
@@ -151,7 +154,7 @@ export function hostApi(passcode: string) {
 
   return {
     session: () => call<{ ok: true }>('GET', '/session'),
-    createUpload: (kind: 'episode' | 'short') => call<{ videoId: string; uploadUrl: string }>('POST', '/uploads', { kind }),
+    createUpload: (kind: 'episode' | 'short' | 'screen') => call<{ videoId: string; uploadUrl: string }>('POST', '/uploads', { kind }),
     video: (id: string) => call<VideoState>('GET', `/videos/${id}`),
     episodes: () => call<HostEpisode[]>('GET', '/episodes'),
     episode: (id: string) => call<HostEpisode>('GET', `/episodes/${id}`),
@@ -192,6 +195,9 @@ export function hostApi(passcode: string) {
     saveEpisodeEdit: (id: string, plan: EditPlan) => call<{ plan: EditPlan; warnings: string[] }>('PUT', `/episodes/${id}/edit`, { plan }),
     makeEpisodeEdit: (id: string) => call<{ status: EditStatus }>('POST', `/episodes/${id}/edit/make`),
     episodePauses: (id: string) => call<Pause[]>('GET', `/episodes/${id}/edit/pauses`),
+    setEditSource: (id: string, name: string, body: { videoId: string; offsetSec: number }) => call<{ plan: EditPlan }>('PUT', `/episodes/${id}/edit/sources/${name}`, body),
+    removeEditSource: (id: string, name: string) => call<{ plan: EditPlan }>('DELETE', `/episodes/${id}/edit/sources/${name}`),
+    sourceActivity: (id: string, name: string) => call<Activity>('GET', `/episodes/${id}/edit/sources/${name}/activity`),
     comments: () => call<HostComment[]>('GET', '/comments'),
     setCommentStatus: (id: string, status: 'approved' | 'rejected') => call<void>('PATCH', `/comments/${id}`, { status }),
   };

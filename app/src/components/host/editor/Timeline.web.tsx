@@ -1,15 +1,20 @@
 import { useRef, useState } from 'react';
-import type { EditCut, EditText } from '../../../lib/host';
+import type { EditCut, EditScene, EditText, EditZoom } from '../../../lib/host';
 import { clock, type Range } from '../../../lib/edit';
 import { colors } from '../../../theme';
 
+// Colors of the layouts in the timeline.
+export const LAYOUT_COLOR: Record<EditScene['layout'], string> = { speaker: '#8E8E9A', screen: '#4FD1A5', 'screen+speaker': '#B48CFF', 'side-by-side': '#FF9F6B' };
+
 // The whole original along one bar: cut parts in red (dashed while only
-// suggested), texts underneath, the selection, and where it's playing.
-// Click to jump; drag to select.
-export function Timeline({ durationSec, cuts, texts, selection, now, onSeek, onSelect }: {
+// suggested), texts and layouts (with zooms) underneath, the selection, and
+// where it's playing. Click to jump; drag to select.
+export function Timeline({ durationSec, cuts, texts, scenes = [], zooms = [], selection, now, onSeek, onSelect }: {
   durationSec: number;
   cuts: EditCut[];
   texts: EditText[];
+  scenes?: EditScene[];
+  zooms?: EditZoom[];
   selection: Range | null;
   now: number;
   onSeek: (t: number) => void;
@@ -84,6 +89,21 @@ export function Timeline({ durationSec, cuts, texts, selection, now, onSeek, onS
           />
         ))}
       </div>
+      {scenes.length + zooms.length > 0 && (
+        <div style={{ position: 'relative', height: 10, marginTop: 2 }}>
+          {scenes.map((sc) => (
+            <div
+              key={sc.id}
+              title={`${sc.layout} (${clock(sc.from)}–${clock(sc.to)})`}
+              onClick={() => onSeek(sc.from)}
+              style={{ position: 'absolute', top: 0, height: 8, ...span(sc.from, sc.to), minWidth: 3, borderRadius: 4, background: LAYOUT_COLOR[sc.layout], opacity: sc.state === 'suggested' ? 0.5 : 1, cursor: 'pointer' }}
+            />
+          ))}
+          {zooms.map((z) => (
+            <div key={z.id} title={`Zoom (${clock(z.from)}–${clock(z.to)})`} style={{ position: 'absolute', top: 2, height: 4, ...span(z.from, z.to), minWidth: 3, background: '#FFE14D', pointerEvents: 'none' }} />
+          ))}
+        </div>
+      )}
       <div style={{ display: 'flex', justifyContent: 'space-between', color: colors.textMuted, fontSize: 12, fontVariantNumeric: 'tabular-nums', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif' }}>
         <span>0:00</span>
         <span>{hover ? clock(hover.t) : ''}</span>

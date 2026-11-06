@@ -2,6 +2,7 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const { execFileSync, spawnSync } = require('child_process');
 const fs = require('fs');
+const http = require('http');
 const os = require('os');
 const path = require('path');
 const plans = require('../src/edit-engine/plan');
@@ -169,4 +170,22 @@ test('the command line edits a plan file, and refuses changes that break it', as
   const bad = spawnSync(process.execPath, [path.join(__dirname, '..', 'bin', 'wave-edit.js'), 'frame', file, '--at', '1']);
   assert.strictEqual(bad.status, 1);
   assert.match(JSON.parse(bad.stdout.toString()).error, /frame needs --out/);
+});
+
+test('links are downloaded first, since the bundled ffmpeg can’t look up host names', async () => {
+  const server = http.createServer((req, res) => fs.createReadStream(source).pipe(res)).listen(0);
+  await new Promise((r) => server.once('listening', r));
+  try {
+    // "localhost" needs a name lookup; given to ffmpeg itself, it crashes.
+    const link = `http://localhost:${server.address().port}/src.mp4`;
+    const engine = ffmpegEngine();
+    assert.strictEqual((await engine.probe(link)).durationSec, 12);
+    assert.strictEqual((await engine.silences(link)).length, 1);
+    const out = path.join(dir, 'from-link.mp4');
+    const result = await engine.render(plans.addCut(twelve(), { from: 0, to: 6 }).plan, { paths: { speaker: link }, out, quality: 'low' });
+    assert.strictEqual(result.durationSec, 6);
+    assert.ok(Math.abs(durationOf(out) - 6) < 0.2);
+  } finally {
+    server.close();
+  }
 });

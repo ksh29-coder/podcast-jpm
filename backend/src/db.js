@@ -298,6 +298,9 @@ alter table videos add column if not exists transcript_words jsonb;
 alter table videos add column if not exists pauses jsonb;
 -- The plan the current video was made from, to tell whether there are changes to make.
 alter table videos add column if not exists edit_rendered jsonb;
+-- For a recording added to an edit (a screen share): when it's blank and when
+-- its picture changes a lot, found once.
+alter table videos add column if not exists activity jsonb;
 `;
 
 // Creates the tables if needed, and fills an empty database from

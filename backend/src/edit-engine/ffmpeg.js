@@ -1,7 +1,10 @@
 const { execFile } = require('child_process');
+const { createWriteStream } = require('fs');
 const fs = require('fs/promises');
 const os = require('os');
 const path = require('path');
+const { Readable } = require('stream');
+const { pipeline } = require('stream/promises');
 const { promisify } = require('util');
 const { TEXT_STYLES, MAIN, ZOOM_EASE_SEC, PlanError, timeline, toOutputTime, keptSegments, layoutSources, included, suggestions: suggestionsOf, validate } = require('./plan');
 
@@ -27,6 +30,25 @@ const PIP_WIDTH = 0.26;
 const PIP_MARGIN = 0.025;
 // In side-by-side, the screen share takes this much of the width.
 const SIDE_SCREEN = 0.64;
+
+// The bundled ffmpeg is a static build that can't look up host names (it
+// crashes on a link like https://…), so links are downloaded first and ffmpeg
+// is given the file. A path is used as it is.
+const isLink = (src) => /^https?:\/\//.test(src);
+async function download(src, file) {
+  if (!isLink(src)) return src;
+  const res = await fetch(src);
+  if (!res.ok) throw new PlanError(`Couldn’t download ${src.split('?')[0]} (${res.status})`);
+  await pipeline(Readable.fromWeb(res.body), createWriteStream(file));
+  return file;
+}
+
+// Each named recording (paths: { name: path or link }) as a file in dir.
+async function downloadAll(paths, dir) {
+  const out = {};
+  for (const [name, src] of Object.entries(paths)) out[name] = await download(src, path.join(dir, `in-${name}`));
+  return out;
+}
 
 const even = (n) => Math.max(2, Math.round(n / 2) * 2);
 function outputSize({ width, height }, maxPx) {
@@ -273,6 +295,9 @@ function ffmpegEngine({ ffmpeg = require('ffmpeg-static') } = {}) {
     }
   }
 
+  // fn with the recording as a file (downloaded first when it's a link).
+  const withFile = (src, fn) => (isLink(src) ? inTemp(async (dir) => fn(await download(src, path.join(dir, 'in')))) : fn(src));
+
   function checked(plan) {
     const result = validate(plan);
     if (!result.ok) throw new PlanError(`The plan has problems:\n- ${result.errors.join('\n- ')}`);
@@ -282,56 +307,66 @@ function ffmpegEngine({ ffmpeg = require('ffmpeg-static') } = {}) {
   const fpsOf = (plan) => plan.source.fps || 30;
 
   return {
+    // Each recording (by name) as a file in dir, downloading links: to read
+    // a long recording once for several steps.
+    downloadAll,
+
     // What a recording is: { durationSec, width, height, fps, hasAudio }.
-    async probe(video) {
-      // ffmpeg exits with an error when given no output; what it prints is enough.
-      const { stderr } = await ff(['-i', video, '-frames:v', '1', '-vf', 'showinfo', '-f', 'null', '-']).catch((e) => {
-        throw new PlanError(`Couldn’t read ${video}: ${(e.stderr || e.message).trim().split('\n').pop()}`);
+    async probe(src) {
+      return withFile(src, async (video) => {
+        // ffmpeg exits with an error when given no output; what it prints is enough.
+        const { stderr } = await ff(['-i', video, '-frames:v', '1', '-vf', 'showinfo', '-f', 'null', '-']).catch((e) => {
+          throw new PlanError(`Couldn’t read ${src}: ${(e.stderr || e.message).trim().split('\n').pop()}`);
+        });
+        const d = /Duration: (\d+):(\d+):([\d.]+)/.exec(stderr);
+        const s = / s:(\d+)x(\d+) /.exec(stderr);
+        if (!d || !s) throw new PlanError(`Couldn’t read the length and size of ${src}`);
+        const fps = /, ([\d.]+) fps,/.exec(stderr);
+        return {
+          durationSec: Math.round((Number(d[1]) * 3600 + Number(d[2]) * 60 + Number(d[3])) * 1000) / 1000,
+          width: Number(s[1]),
+          height: Number(s[2]),
+          fps: fps ? Math.min(60, Number(fps[1])) : 30,
+          hasAudio: /Stream #\S+.*: Audio:/.test(stderr),
+        };
       });
-      const d = /Duration: (\d+):(\d+):([\d.]+)/.exec(stderr);
-      const s = / s:(\d+)x(\d+) /.exec(stderr);
-      if (!d || !s) throw new PlanError(`Couldn’t read the length and size of ${video}`);
-      const fps = /, ([\d.]+) fps,/.exec(stderr);
-      return {
-        durationSec: Math.round((Number(d[1]) * 3600 + Number(d[2]) * 60 + Number(d[3])) * 1000) / 1000,
-        width: Number(s[1]),
-        height: Number(s[2]),
-        fps: fps ? Math.min(60, Number(fps[1])) : 30,
-        hasAudio: /Stream #\S+.*: Audio:/.test(stderr),
-      };
     },
 
     // Quiet stretches of at least minSec, quieter than noiseDb:
     // [{ from, to, durationSec }] in source time.
-    async silences(video, { minSec = 1, noiseDb = -35 } = {}) {
-      const { stderr } = await ff(['-i', video, '-vn', '-af', `silencedetect=noise=${noiseDb}dB:d=${minSec}`, '-f', 'null', '-']);
-      const found = [];
-      let start = null;
-      for (const line of stderr.split('\n')) {
-        const a = /silence_start: (-?[\d.]+)/.exec(line);
-        const b = /silence_end: ([\d.]+)/.exec(line);
-        if (a) start = Math.max(0, Number(a[1]));
-        if (b && start !== null) {
-          found.push({ from: start, to: Number(b[1]), durationSec: Math.round((Number(b[1]) - start) * 1000) / 1000 });
-          start = null;
+    async silences(src, { minSec = 1, noiseDb = -35 } = {}) {
+      return withFile(src, async (video) => {
+        const { stderr } = await ff(['-i', video, '-vn', '-af', `silencedetect=noise=${noiseDb}dB:d=${minSec}`, '-f', 'null', '-']);
+        const found = [];
+        let start = null;
+        for (const line of stderr.split('\n')) {
+          const a = /silence_start: (-?[\d.]+)/.exec(line);
+          const b = /silence_end: ([\d.]+)/.exec(line);
+          if (a) start = Math.max(0, Number(a[1]));
+          if (b && start !== null) {
+            found.push({ from: start, to: Number(b[1]), durationSec: Math.round((Number(b[1]) - start) * 1000) / 1000 });
+            start = null;
+          }
         }
-      }
-      return found;
+        return found;
+      });
     },
 
     // What happens on a recording's picture, on the main recording's clock:
     // blank stretches (black, like a screen share that hasn't started) and
     // moments the picture changes a lot (a new slide, window or page).
-    async activity(video, { offsetSec = 0, minBlankSec = 1, change = 0.3 } = {}) {
-      const { stderr } = await ff(['-i', video, '-an', '-vf', `scale=320:-2,blackdetect=d=${minBlankSec}:pix_th=0.1,select='gt(scene,${change})',showinfo`, '-f', 'null', '-']);
-      const at = (t) => Math.round((Number(t) + offsetSec) * 1000) / 1000;
-      const blank = [...stderr.matchAll(/black_start:([\d.]+) black_end:([\d.]+)/g)].map((m) => ({ from: at(m[1]), to: at(m[2]) }));
-      const changes = [...stderr.matchAll(/\] n:\s*\d+ pts:\s*\d+ pts_time:([\d.]+)/g)].map((m) => at(m[1]));
-      return { blank, changes };
+    async activity(src, { offsetSec = 0, minBlankSec = 1, change = 0.3 } = {}) {
+      return withFile(src, async (video) => {
+        const { stderr } = await ff(['-i', video, '-an', '-vf', `scale=320:-2,blackdetect=d=${minBlankSec}:pix_th=0.1,select='gt(scene,${change})',showinfo`, '-f', 'null', '-']);
+        const at = (t) => Math.round((Number(t) + offsetSec) * 1000) / 1000;
+        const blank = [...stderr.matchAll(/black_start:([\d.]+) black_end:([\d.]+)/g)].map((m) => ({ from: at(m[1]), to: at(m[2]) }));
+        const changes = [...stderr.matchAll(/\] n:\s*\d+ pts:\s*\d+ pts_time:([\d.]+)/g)].map((m) => at(m[1]));
+        return { blank, changes };
+      });
     },
 
     // The edited video, as an MP4 at `out`. paths are each recording's path or
-    // URL by name ("speaker" and the plan's sources).
+    // link by name ("speaker" and the plan's sources).
     async render(fullPlan, { paths, out, quality = 'full', suggestions = false }) {
       const { warnings } = checked(fullPlan);
       const plan = included(fullPlan, { suggestions });
@@ -342,14 +377,15 @@ function ffmpegEngine({ ffmpeg = require('ffmpeg-static') } = {}) {
       const inputs = { [MAIN]: 0 };
       sourcesShown(plan).forEach((name, i) => (inputs[name] = i + 2));
       return inTemp(async (dir) => {
+        const files = await downloadAll(Object.fromEntries(Object.keys(inputs).map((name) => [name, paths[name]])), dir);
         await fs.writeFile(path.join(dir, 'texts.ass'), buildAss(tl.texts, canvas));
         await fs.writeFile(path.join(dir, 'chapters.txt'), buildChapterMetadata(tl.chapters, tl.durationSec));
         const started = Date.now();
-        const sourceArgs = Object.keys(inputs).filter((name) => name !== MAIN).flatMap((name) => ['-i', paths[name]]);
+        const sourceArgs = Object.keys(inputs).filter((name) => name !== MAIN).flatMap((name) => ['-i', files[name]]);
         await ff(
           [
             '-y', '-loglevel', 'error',
-            '-i', paths[MAIN],
+            '-i', files[MAIN],
             '-i', 'chapters.txt',
             ...sourceArgs,
             '-filter_complex', buildGraph(plan, { canvas, fps: fpsOf(plan), inputs, segments: tl.segments, audio }),
@@ -388,8 +424,9 @@ function ffmpegEngine({ ffmpeg = require('ffmpeg-static') } = {}) {
       sourcesShown(p).forEach((name, i) => (inputs[name] = i + 1));
       // Start reading a little before, so the frame is exact.
       const seekFrom = Math.max(0, at - 1);
-      const seekArgs = (name) => ['-ss', String(Math.max(0, seekFrom - (name === MAIN ? 0 : p.sources[name].offsetSec))), '-i', paths[name]];
       return inTemp(async (dir) => {
+        const files = await downloadAll(Object.fromEntries(Object.keys(inputs).map((name) => [name, paths[name]])), dir);
+        const seekArgs = (name) => ['-ss', String(Math.max(0, seekFrom - (name === MAIN ? 0 : p.sources[name].offsetSec))), '-i', files[name]];
         await fs.writeFile(path.join(dir, 'texts.ass'), buildAss(tl.texts, canvas));
         await ff(
           [
@@ -415,8 +452,9 @@ function ffmpegEngine({ ffmpeg = require('ffmpeg-static') } = {}) {
       if (t < 0 || t > info.durationSec) throw new PlanError(`The ${source} recording doesn’t cover ${at}s`);
       const size = outputSize(info, 1280);
       return inTemp(async (dir) => {
+        const file = await download(paths[source], path.join(dir, 'in'));
         await fs.writeFile(path.join(dir, 'grid.ass'), buildGridAss(size));
-        await ff(['-y', '-loglevel', 'error', '-ss', String(t), '-i', paths[source], '-frames:v', '1', '-vf', `scale=${size.width}:${size.height}${grid ? ',ass=grid.ass:fontsdir=fonts' : ''}`, '-q:v', '3', path.resolve(out)], { cwd: dir });
+        await ff(['-y', '-loglevel', 'error', '-ss', String(t), '-i', file, '-frames:v', '1', '-vf', `scale=${size.width}:${size.height}${grid ? ',ass=grid.ass:fontsdir=fonts' : ''}`, '-q:v', '3', path.resolve(out)], { cwd: dir });
         return { out: path.resolve(out), source, at, ...size, grid };
       });
     },

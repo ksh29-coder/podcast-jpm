@@ -119,7 +119,7 @@ function hostRouter({ store, engagement, push, later, baseUrl, passcode, db }) {
     '/uploads',
     ah(async (req, res) => {
       const kind = req.body?.kind;
-      if (!['episode', 'short'].includes(kind)) throw httpError(400, 'kind must be "episode" or "short"');
+      if (!['episode', 'short', 'screen'].includes(kind)) throw httpError(400, 'kind must be "episode", "short" or "screen"');
       res.status(201).json(await store.createUpload({ kind }));
     })
   );
@@ -222,6 +222,21 @@ function hostRouter({ store, engagement, push, later, baseUrl, passcode, db }) {
   r.put('/episodes/:id/edit', ah(async (req, res) => res.json(await store.saveEpisodeEdit(req.params.id, req.body?.plan))));
   r.post('/episodes/:id/edit/make', ah(async (req, res) => res.status(202).json(await store.makeEpisodeEdit(req.params.id))));
   r.get('/episodes/:id/edit/pauses', ah(async (req, res) => res.json(await store.episodePauses(req.params.id))));
+  // Another recording for the edit, like the screen share: upload it with
+  // kind "screen", then add it here once processed.
+  r.put(
+    '/episodes/:id/edit/sources/:name',
+    ah(async (req, res) =>
+      res.json(
+        await store.setEditSource(req.params.id, req.params.name, {
+          videoId: str(req.body?.videoId, 'videoId', { required: true }),
+          offsetSec: num(req.body?.offsetSec, 'offsetSec') ?? 0,
+        })
+      )
+    )
+  );
+  r.delete('/episodes/:id/edit/sources/:name', ah(async (req, res) => res.json(await store.removeEditSource(req.params.id, req.params.name))));
+  r.get('/episodes/:id/edit/sources/:name/activity', ah(async (req, res) => res.json(await store.editSourceActivity(req.params.id, req.params.name))));
 
   r.get('/shorts', ah(async (req, res) => res.json(await engagement.withStats('short', await store.hostShorts(baseUrl(req)), 'host'))));
 

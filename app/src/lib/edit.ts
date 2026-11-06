@@ -105,3 +105,48 @@ export function withItem<K extends 'cuts' | 'texts'>(plan: EditPlan, kind: K, it
   const at = list.findIndex((i) => i.id === item.id);
   return { ...plan, [kind]: at === -1 ? [...list, item] : list.map((i) => (i.id === item.id ? item : i)) };
 }
+
+// A layout (or zoom) placed over from–to: ones it covers go, ones it
+// overlaps are trimmed, and one it falls inside is split around it, since
+// only one can be on at a time.
+export function placeRange<T extends EditItem>(items: T[], item: T): T[] {
+  const out: T[] = [];
+  for (const s of items) {
+    if (s.to <= item.from || s.from >= item.to) out.push(s);
+    else if (s.from < item.from && s.to > item.to) out.push({ ...s, to: item.from }, { ...s, id: newId(s.id.split('_')[0]), from: item.to });
+    else if (s.from < item.from) out.push({ ...s, to: item.from });
+    else if (s.to > item.to) out.push({ ...s, from: item.to });
+  }
+  return [...out, item].sort((a, b) => a.from - b.from);
+}
+
+// The stretches a screen recording shows something: from its start to its
+// end on the original's clock, less its blank parts, at least minSec long.
+export function sharedRanges(blank: Range[], offsetSec: number, durationSec: number, minSec = 5): Range[] {
+  const out: Range[] = [];
+  let at = Math.max(0, offsetSec);
+  const end = offsetSec + durationSec;
+  for (const b of [...blank].sort((x, y) => x.from - y.from)) {
+    if (b.from > at) out.push({ from: at, to: Math.min(b.from, end) });
+    at = Math.max(at, b.to);
+  }
+  if (at < end) out.push({ from: at, to: end });
+  return out.filter((r) => r.to - r.from >= minSec).map((r) => ({ from: round(r.from), to: round(r.to) }));
+}
+
+// A zoom's rect drawn freely, made the picture's shape (the video keeps its
+// shape, so a zoom shows a box like it) and kept inside the picture.
+export function zoomRect(drawn: { x: number; y: number; w: number; h: number }): [number, number, number, number] {
+  const size = Math.min(1, Math.max(0.1, drawn.w, drawn.h));
+  const cx = drawn.x + drawn.w / 2;
+  const cy = drawn.y + drawn.h / 2;
+  const clamp = (c: number) => Math.min(Math.max(c - size / 2, 0), 1 - size);
+  return [round(clamp(cx)), round(clamp(cy)), round(size), round(size)];
+}
+
+// How far into a zoom it is, 0 (whole picture) to 1 (its rect): it eases in
+// and out over half a second, as the edited video does.
+export function zoomAmount(zoom: Range, t: number, ease = 0.5) {
+  const clip = (v: number) => Math.min(1, Math.max(0, v));
+  return clip((t - zoom.from) / ease) * clip((zoom.to - t) / ease);
+}
