@@ -114,7 +114,7 @@ test('a render keeps the kept parts, draws the text and keeps the chapters', asy
   plan = plans.addChapter(plan, { at: 0, title: 'Red' }).plan;
   plan = plans.addChapter(plan, { at: 8, title: 'Blue' }).plan;
   const out = path.join(dir, 'out.mp4');
-  const result = await ffmpegEngine().render(plan, { sourcePath: source, out, quality: 'low' });
+  const result = await ffmpegEngine().render(plan, { paths: { speaker: source }, out, quality: 'low' });
   assert.strictEqual(result.durationSec, 8);
   assert.ok(Math.abs(durationOf(out) - 8) < 0.2, `rendered ${durationOf(out)}s`);
   assert.ok(near(pixel(out, 5, 10, 10), BLUE), 'after the cut comes the blue part');
@@ -132,16 +132,16 @@ test('a frame shows the edit at a source time, and refuses a time that is cut', 
   plan = plans.addText(plan, { from: 8, to: 12, text: 'Blue part', style: 'title' }).plan;
   const engine = ffmpegEngine();
   const out = path.join(dir, 'frame.jpg');
-  const result = await engine.frame(plan, { sourcePath: source, at: 9, out });
+  const result = await engine.frame(plan, { paths: { speaker: source }, at: 9, out });
   assert.strictEqual(result.outputAt, 5);
   assert.ok(near(pixel(out, null, 4, 4), BLUE));
   assert.ok(!near(pixel(out, null, 160, 90), BLUE), 'the text is drawn');
-  await assert.rejects(engine.frame(plan, { sourcePath: source, at: 5, out }), /cut out; the video carries on at 8s/);
+  await assert.rejects(engine.frame(plan, { paths: { speaker: source }, at: 5, out }), /cut out; the video carries on at 8s/);
 });
 
 test('the quiet stretch is found', async () => {
   const engine = ffmpegEngine();
-  assert.deepStrictEqual(await engine.probe(source), { durationSec: 12, width: 320, height: 180, hasAudio: true });
+  assert.deepStrictEqual(await engine.probe(source), { durationSec: 12, width: 320, height: 180, fps: 25, hasAudio: true });
   const found = await engine.silences(source, { minSec: 1 });
   assert.strictEqual(found.length, 1);
   assert.ok(Math.abs(found[0].from - 5) < 0.1 && Math.abs(found[0].to - 7) < 0.1, JSON.stringify(found));
@@ -168,5 +168,5 @@ test('the command line edits a plan file, and refuses changes that break it', as
   // As a program: JSON out, and exit code 1 when something is wrong.
   const bad = spawnSync(process.execPath, [path.join(__dirname, '..', 'bin', 'wave-edit.js'), 'frame', file, '--at', '1']);
   assert.strictEqual(bad.status, 1);
-  assert.match(JSON.parse(bad.stdout.toString()).error, /--at <seconds> --out/);
+  assert.match(JSON.parse(bad.stdout.toString()).error, /frame needs --out/);
 });

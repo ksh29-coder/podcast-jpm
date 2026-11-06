@@ -40,35 +40,52 @@ Media paths in `data/episodes.json` are server-relative; the API returns them as
 
 ## Edit engine (`wave-edit`)
 
-Edits a long recording without changing it: an **edit plan** (JSON) lists the cuts, on-screen texts
-and chapters, and rendering turns the plan into a new video with ffmpeg. The same engine is meant
-to sit behind the Host Studio editor and AI editing agents, so the command line prints one JSON
-object per command and exits 1 with `{ ok: false, error }` when something is wrong.
+Edits a podcast recording without changing it: an **edit plan** (JSON) lists the cuts, layouts,
+zooms, on-screen texts and chapters, and rendering turns the plan into a new video with ffmpeg.
+It's made for **AI editors first**, with the host deciding: every change can be a suggestion with
+a reason and who made it, which shows in previews but only reaches the final video once accepted.
+The command line prints one JSON object per command and exits 1 with `{ ok: false, error }`
+saying what to fix. The Claude Code skill `.claude/skills/wave-edit` runs it as an editing team.
 
 ```sh
-npm run edit -- init ep.json --video recording.mp4
-npm run edit -- silences ep.json --min 1.5            # quiet stretches worth cutting
-npm run edit -- cut ep.json --from 0 --to 94.2 --reason "pre-show chatter"
-npm run edit -- text ep.json --from 95 --to 100 --style lower-third --text "Alice Chen" --subtitle "Platform Engineering"
-npm run edit -- chapter ep.json --at 95 --title "Intro"
-npm run edit -- show ep.json                         # the plan and the edited timeline
-npm run edit -- frame ep.json --at 96 --out check.jpg # one frame of the edit, texts included
-npm run edit -- render ep.json --out final.mp4        # --low for a quick small version
-npm run edit -- remove ep.json <id>                   # undo any cut, text or chapter
-
-# Editing by what was said
-npm run edit -- transcribe ep.json                   # AI, word by word, with speakers
+# Set up: Zoom's speaker video, its shared-screen video, and an AI transcript
+npm run edit -- init ep.json --video speaker.mp4
+npm run edit -- add-source ep.json --name screen --video shared-screen.mp4   # --offset if it starts later
+npm run edit -- transcribe ep.json                   # word by word, with speakers
 npm run edit -- speaker ep.json 0 --name "Alice Chen"
+
+# Find
 npm run edit -- transcript ep.json --from 0 --to 300  # lines, speakers, and what's cut
 npm run edit -- search ep.json --text "kubernetes"
+npm run edit -- fillers ep.json                       # um/uh still in the edit
+npm run edit -- silences ep.json --min 1.5            # quiet stretches
+npm run edit -- activity ep.json                      # when the screen share is blank or changes
+npm run edit -- look ep.json --source screen --at 600 --out look.jpg   # the screen, with a grid
+
+# Change (AI editors add: --suggest --by rough-cut --reason "small talk before the show")
+npm run edit -- cut ep.json --from 0 --to 94.2
 npm run edit -- cut ep.json --text "can you see my screen"
-npm run edit -- fillers ep.json --apply               # cut every um/uh still in the edit
+npm run edit -- scene ep.json --from 310 --to 845 --layout screen+speaker
+npm run edit -- zoom ep.json --from 400 --to 460 --rect 0.5,0,0.5,0.5
+npm run edit -- text ep.json --from 95 --to 100 --style lower-third --text "Alice Chen" --subtitle "Platform Engineering"
+npm run edit -- chapter ep.json --at 95 --title "Intro"
+npm run edit -- remove ep.json <id>…
+
+# Review and make
+npm run edit -- suggestions ep.json                   # each in plain words, with why and who
+npm run edit -- accept ep.json <id>… --by host        # or --all; reject the same way
+npm run edit -- frame ep.json --at 96 --out check.jpg # one frame of the edit, suggestions included
+npm run edit -- render ep.json --low --suggestions --out preview.mp4
+npm run edit -- render ep.json --out final.mp4        # accepted changes only
 ```
 
-- **Times are seconds of the original recording**, so a cut never moves anything else; `show`
-  gives where each text and chapter lands in the edited video.
-- Changes take `--dry-run` to see them without saving, and a change that would break the plan
-  (say, a cut past the end) is refused.
+- **Times are seconds of the main (speaker) recording**, for every recording, so a cut never moves
+  anything else; `show` gives where everything lands in the edited video.
+- Changes take `--dry-run`, and a change that would break the plan (a cut past the end, two scenes
+  at once) is refused. Every saved change goes in the plan's `log` with who made it.
+- **Layouts** (`scene`): `speaker` (the default everywhere), `screen`, `screen+speaker` (the speaker
+  small in a corner, `--pip`) and `side-by-side`. The screen share keeps its shape inside the
+  picture. **Zooms** ease in and out over half a second; the rect zooms by its bigger side.
 - Text styles: `lower-third`, `title`, `caption`, `label`, with optional `--x`/`--y` (0–1). Text is
   drawn by libass in Inter (in `assets/fonts`, SIL Open Font License), so it looks the same anywhere.
 - Chapters are written into the MP4, at their edited times.
@@ -81,9 +98,11 @@ npm run edit -- fillers ep.json --apply               # cut every um/uh still in
 - `cut --text` only cuts words said once in what's left of the edit; otherwise it lists each place
   so you can pick one with `--from`/`--to`. `fillers` looks for um/uh/erm…; add phrases that are
   often meant, like "you know", with `--also`.
-- Code: `src/edit-engine/plan.js` (the plan, its timeline and checks, no ffmpeg),
-  `src/edit-engine/ffmpeg.js` (probe, silences, frame, render) and
-  `src/edit-engine/transcript.js` (reading transcripts, search, fillers).
+- **For AI models in the app**: `wave-edit tools` (or `tools()` from `bin/wave-edit.js`) gives every
+  command as a tool definition (name, description, JSON schema), and `call(name, input)` runs one.
+- Code: `src/edit-engine/plan.js` (the plan, timeline, checks and suggestions; no ffmpeg),
+  `src/edit-engine/ffmpeg.js` (probe, silences, activity, look, frame, render),
+  `src/edit-engine/transcript.js` (transcripts, search, fillers) and `bin/wave-edit.js`.
 
 Long renders don't fit in a Vercel function; they're meant for a background worker.
 

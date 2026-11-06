@@ -3,7 +3,7 @@ const fs = require('fs/promises');
 const os = require('os');
 const path = require('path');
 const { promisify } = require('util');
-const { TEXT_STYLES, PlanError, timeline, toOutputTime, keptSegments, validate } = require('./plan');
+const { TEXT_STYLES, MAIN, ZOOM_EASE_SEC, PlanError, timeline, toOutputTime, keptSegments, layoutSources, included, suggestions: suggestionsOf, validate } = require('./plan');
 
 const run = promisify(execFile);
 
@@ -20,9 +20,22 @@ const QUALITY = {
   low: { maxPx: 640, preset: 'ultrafast', crf: '30' },
 };
 
+// Behind a screen share that doesn't fill the picture.
+const BACKDROP = '0x111111';
+// The speaker in a corner: this much of the picture's width, this far in.
+const PIP_WIDTH = 0.26;
+const PIP_MARGIN = 0.025;
+// In side-by-side, the screen share takes this much of the width.
+const SIDE_SCREEN = 0.64;
+
 const even = (n) => Math.max(2, Math.round(n / 2) * 2);
 function outputSize({ width, height }, maxPx) {
   const scale = Math.min(1, maxPx / Math.max(width, height));
+  return { width: even(width * scale), height: even(height * scale) };
+}
+// A picture of width x height made as big as fits in box, keeping its shape.
+function fitIn({ width, height }, box) {
+  const scale = Math.min(box.width / width, box.height / height);
   return { width: even(width * scale), height: even(height * scale) };
 }
 
@@ -40,13 +53,30 @@ function assTime(sec) {
 // are escaped as libass allows; line breaks become \N.
 const assText = (s) =>
   String(s)
-    .replace(/\\/g, '\\​')
+    .replace(/\\/g, '\\\u200b')
     .replace(/[{}]/g, (c) => `\\${c}`)
     .replace(/\r?\n/g, '\\N');
 
 // .ass colours are &HAABBGGRR, where AA 00 is solid.
 const WHITE = '&H00FFFFFF';
 const BOX = '&H40101010';
+
+const assHeader = ({ width, height }, styles) =>
+  [
+    '[Script Info]',
+    'ScriptType: v4.00+',
+    `PlayResX: ${width}`,
+    `PlayResY: ${height}`,
+    'WrapStyle: 0',
+    'ScaledBorderAndShadow: yes',
+    '',
+    '[V4+ Styles]',
+    'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
+    ...styles,
+    '',
+    '[Events]',
+    'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
+  ].join('\n');
 
 // The .ass file that draws the plan's texts on a width x height video, at the
 // edited video's times.
@@ -65,23 +95,25 @@ function buildAss(texts, { width, height }) {
     if (t.subtitle) body += `\\N{\\b0\\fs${Math.round((s.subtitleSize || s.size) * height)}}${assText(t.subtitle)}`;
     return `Dialogue: 0,${assTime(t.outFrom)},${assTime(t.outTo)},${t.style},,0,0,0,,{\\an${s.align}\\pos(${x},${y})}${body}`;
   });
-  return [
-    '[Script Info]',
-    'ScriptType: v4.00+',
-    `PlayResX: ${width}`,
-    `PlayResY: ${height}`,
-    'WrapStyle: 0',
-    'ScaledBorderAndShadow: yes',
-    '',
-    '[V4+ Styles]',
-    'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
-    ...styles,
-    '',
-    '[Events]',
-    'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
-    ...events,
-    '',
-  ].join('\n');
+  return `${assHeader({ width, height }, styles)}\n${events.join('\n')}\n`;
+}
+
+// A grid over a picture, labelled with fractions of its width and height,
+// so whoever looks at it (often an AI) can say where things are.
+function buildGridAss({ width, height }) {
+  const size = Math.round(height * 0.028);
+  const style = `Style: grid,${FONT},${size},&H0000FFFF,&H0000FFFF,&H80000000,&H80000000,-1,0,0,0,100,100,0,0,3,2,0,7,0,0,0,1`;
+  const lines = [];
+  const all = `0:00:00.00,9:00:00.00`;
+  for (let i = 1; i < 10; i++) {
+    const x = Math.round((width * i) / 10);
+    const y = Math.round((height * i) / 10);
+    lines.push(`Dialogue: 0,${all},grid,,0,0,0,,{\\an7\\pos(0,0)\\bord0\\1c&H0000FFFF&\\1a&H60&\\p1}m ${x} 0 l ${x + 1} 0 ${x + 1} ${height} ${x} ${height}{\\p0}`);
+    lines.push(`Dialogue: 0,${all},grid,,0,0,0,,{\\an7\\pos(0,0)\\bord0\\1c&H0000FFFF&\\1a&H60&\\p1}m 0 ${y} l ${width} ${y} ${width} ${y + 1} 0 ${y + 1}{\\p0}`);
+    lines.push(`Dialogue: 1,${all},grid,,0,0,0,,{\\an7\\pos(${x + 3},3)}${(i / 10).toFixed(1)}`);
+    lines.push(`Dialogue: 1,${all},grid,,0,0,0,,{\\an7\\pos(3,${y + 3})}${(i / 10).toFixed(1)}`);
+  }
+  return `${assHeader({ width, height }, [style])}\n${lines.join('\n')}\n`;
 }
 
 // Chapters in ffmpeg's metadata format, so players show them.
@@ -95,21 +127,136 @@ function buildChapterMetadata(chapters, durationSec) {
   return `${lines.join('\n')}\n`;
 }
 
-// The filter graph that keeps the plan's segments of input 0, joins them and
-// draws the texts. Ends in [v] (and [a] when there is sound).
-function buildFilter({ segments, size, hasAudio }) {
-  const n = segments.length;
-  const parts = [`[0:v]split=${n}${segments.map((_, i) => `[vi${i}]`).join('')}`];
-  if (hasAudio) parts.push(`[0:a]asplit=${n}${segments.map((_, i) => `[ai${i}]`).join('')}`);
-  segments.forEach((s, i) => {
-    parts.push(`[vi${i}]trim=start=${s.from}:end=${s.to},setpts=PTS-STARTPTS[v${i}]`);
-    if (hasAudio) parts.push(`[ai${i}]atrim=start=${s.from}:end=${s.to},asetpts=PTS-STARTPTS[a${i}]`);
+// zoompan expressions for zooms (in edited time) on a picture: each eases in
+// over ZOOM_EASE_SEC to show its rect, and back out before it ends.
+function zoomExpressions(zooms) {
+  const f = (n) => Number(n.toFixed(4));
+  const terms = zooms.map((z) => {
+    const [x, y, w, h] = z.rect;
+    const ramp = `clip((it-${f(z.outFrom)})/${ZOOM_EASE_SEC},0,1)*clip((${f(z.outTo)}-it)/${ZOOM_EASE_SEC},0,1)`;
+    return { ramp, zoom: f(1 / Math.max(w, h)), cx: f(x + w / 2), cy: f(y + h / 2) };
   });
-  const ins = segments.map((_, i) => (hasAudio ? `[v${i}][a${i}]` : `[v${i}]`)).join('');
-  parts.push(`${ins}concat=n=${n}:v=1:a=${hasAudio ? 1 : 0}[vc]${hasAudio ? '[a]' : ''}`);
-  parts.push(`[vc]scale=${size.width}:${size.height},setsar=1,ass=texts.ass:fontsdir=fonts,format=yuv420p[v]`);
+  const sum = (part) => terms.map(part).join('+') || '0';
+  return {
+    z: `1+${sum((t) => `${f(t.zoom - 1)}*${t.ramp}`)}`,
+    x: `clip((0.5+${sum((t) => `${f(t.cx - 0.5)}*${t.ramp}`)})*iw-iw/zoom/2,0,iw-iw/zoom)`,
+    y: `clip((0.5+${sum((t) => `${f(t.cy - 0.5)}*${t.ramp}`)})*ih-ih/zoom/2,0,ih-ih/zoom)`,
+  };
+}
+
+// The filter graph for a plan (already without anything not wanted, like
+// suggestions). Ends in [v], and [a] with audio.
+//
+//   inputs:   { [source name]: input number } for the speaker and the
+//             sources the scenes show
+//   seekFrom: where in the main recording the inputs were started (-ss), to
+//             make a single frame without reading everything before it
+//   segments: the kept parts to make (all of them, or a sliver for a frame)
+//   shift:    the edited time the first segment starts at
+function buildGraph(plan, { canvas, fps, inputs, seekFrom = 0, segments, shift = 0, audio = false, overlays = 'texts.ass' }) {
+  const tl = timeline(plan);
+  const parts = [];
+  const n = segments.length;
+  const cutUp = (label, name, { withAudio = false } = {}) => {
+    parts.push(`[${label}]split=${n}${segments.map((_, i) => `[${name}v${i}]`).join('')}`);
+    if (withAudio) parts.push(`[0:a]asplit=${n}${segments.map((_, i) => `[${name}a${i}]`).join('')}`);
+    segments.forEach((s, i) => {
+      const range = `start=${Math.max(0, s.from - seekFrom)}:end=${s.to - seekFrom}`;
+      parts.push(`[${name}v${i}]trim=${range},setpts=PTS-STARTPTS[${name}t${i}]`);
+      if (withAudio) parts.push(`[${name}a${i}]atrim=${range},asetpts=PTS-STARTPTS[${name}u${i}]`);
+    });
+    const ins = segments.map((_, i) => (withAudio ? `[${name}t${i}][${name}u${i}]` : `[${name}t${i}]`)).join('');
+    parts.push(`${ins}concat=n=${n}:v=1:a=${withAudio ? 1 : 0}[${name}c]${withAudio ? '[a]' : ''}`);
+    parts.push(`[${name}c]setpts=PTS+${shift}/TB[${name}]`);
+  };
+
+  // Each recording, on the main recording's clock, at the size it's used at.
+  const sizes = { [MAIN]: canvas };
+  const streams = {};
+  for (const [name, input] of Object.entries(inputs)) {
+    const label = `src${input}`;
+    if (name === MAIN) {
+      parts.push(`[${input}:v]setpts=PTS-STARTPTS,fps=${fps},scale=${canvas.width}:${canvas.height},setsar=1[${label}]`);
+    } else {
+      const src = plan.sources[name];
+      sizes[name] = fitIn(src, canvas);
+      // Black before it starts, and its last picture held after it ends.
+      const before = Math.max(0, src.offsetSec - seekFrom);
+      parts.push(
+        `[${input}:v]setpts=PTS-STARTPTS,fps=${fps},scale=${sizes[name].width}:${sizes[name].height},setsar=1,` +
+          `tpad=start_duration=${before}:color=black:stop_mode=clone:stop_duration=${Math.ceil(plan.source.durationSec + 5)}[${label}]`
+      );
+    }
+    cutUp(label, `s${input}`, { withAudio: name === MAIN && audio });
+    streams[name] = `s${input}`;
+  }
+
+  // Zooms, within each recording's own picture.
+  for (const name of Object.keys(streams)) {
+    const zooms = tl.zooms.filter((z) => z.source === name);
+    if (!zooms.length) continue;
+    const e = zoomExpressions(zooms);
+    const { width, height } = sizes[name];
+    parts.push(`[${streams[name]}]zoompan=z='${e.z}':x='${e.x}':y='${e.y}':d=1:s=${width}x${height}:fps=${fps}[${streams[name]}z]`);
+    streams[name] = `${streams[name]}z`;
+  }
+
+  // One picture per kind of scene, then each shown over the speaker while
+  // its scenes are on.
+  const groups = new Map();
+  for (const s of tl.scenes) {
+    if (s.layout === MAIN) continue;
+    const key = `${s.layout}|${s.source || 'screen'}|${s.pip || 'bottom-right'}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(s);
+  }
+  const uses = { [MAIN]: 1 };
+  for (const key of groups.keys()) {
+    const [layout, source] = key.split('|');
+    uses[source] = (uses[source] || 0) + 1;
+    if (layout !== 'screen') uses[MAIN] += 1;
+  }
+  const copies = {};
+  for (const [name, count] of Object.entries(uses)) {
+    copies[name] = Array.from({ length: count }, (_, i) => `${streams[name]}_${i}`);
+    parts.push(count === 1 ? `[${streams[name]}]null[${copies[name][0]}]` : `[${streams[name]}]split=${count}${copies[name].map((c) => `[${c}]`).join('')}`);
+  }
+  const take = (name) => copies[name].shift();
+  const { width: W, height: H } = canvas;
+  let current = take(MAIN);
+  let g = 0;
+  for (const [key, scenes] of groups) {
+    const [layout, source, pip] = key.split('|');
+    const L = `layout${g}`;
+    const screenFull = () => `[${take(source)}]pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=${BACKDROP}`;
+    if (layout === 'screen') parts.push(`${screenFull()}[${L}]`);
+    if (layout === 'screen+speaker') {
+      const pw = even(W * PIP_WIDTH);
+      const ph = even((pw * H) / W);
+      const m = Math.round(W * PIP_MARGIN);
+      const x = pip.endsWith('left') ? m : W - pw - m;
+      const y = pip.startsWith('top') ? m : H - ph - m;
+      parts.push(`${screenFull()}[${L}bg]`, `[${take(MAIN)}]scale=${pw}:${ph}[${L}pip]`, `[${L}bg][${L}pip]overlay=${x}:${y}[${L}]`);
+    }
+    if (layout === 'side-by-side') {
+      const lw = even(W * SIDE_SCREEN);
+      parts.push(
+        `[${take(source)}]scale=${lw}:${H}:force_original_aspect_ratio=decrease,pad=${lw}:${H}:(ow-iw)/2:(oh-ih)/2:color=${BACKDROP}[${L}l]`,
+        `[${take(MAIN)}]crop=${W - lw}:${H}[${L}r]`,
+        `[${L}l][${L}r]hstack[${L}]`
+      );
+    }
+    const when = scenes.map((s) => `between(t,${s.outFrom},${s.outTo})`).join('+');
+    parts.push(`[${current}][${L}]overlay=0:0:enable='${when}'[over${g}]`);
+    current = `over${g}`;
+    g++;
+  }
+  parts.push(`[${current}]ass=${overlays}:fontsdir=fonts,format=yuv420p[v]`);
   return parts.join(';');
 }
+
+// The recordings a plan's scenes show, besides the speaker.
+const sourcesShown = (plan) => [...new Set(timeline(plan).scenes.flatMap(layoutSources))];
 
 function ffmpegEngine({ ffmpeg = require('ffmpeg-static') } = {}) {
   const ff = (args, opts = {}) => run(ffmpeg, ['-hide_banner', ...args], { maxBuffer: 64 << 20, ...opts });
@@ -132,8 +279,10 @@ function ffmpegEngine({ ffmpeg = require('ffmpeg-static') } = {}) {
     return result;
   }
 
+  const fpsOf = (plan) => plan.source.fps || 30;
+
   return {
-    // What a recording is: { durationSec, width, height, hasAudio }.
+    // What a recording is: { durationSec, width, height, fps, hasAudio }.
     async probe(video) {
       // ffmpeg exits with an error when given no output; what it prints is enough.
       const { stderr } = await ff(['-i', video, '-frames:v', '1', '-vf', 'showinfo', '-f', 'null', '-']).catch((e) => {
@@ -142,10 +291,12 @@ function ffmpegEngine({ ffmpeg = require('ffmpeg-static') } = {}) {
       const d = /Duration: (\d+):(\d+):([\d.]+)/.exec(stderr);
       const s = / s:(\d+)x(\d+) /.exec(stderr);
       if (!d || !s) throw new PlanError(`Couldn’t read the length and size of ${video}`);
+      const fps = /, ([\d.]+) fps,/.exec(stderr);
       return {
         durationSec: Math.round((Number(d[1]) * 3600 + Number(d[2]) * 60 + Number(d[3])) * 1000) / 1000,
         width: Number(s[1]),
         height: Number(s[2]),
+        fps: fps ? Math.min(60, Number(fps[1])) : 30,
         hasAudio: /Stream #\S+.*: Audio:/.test(stderr),
       };
     },
@@ -168,68 +319,108 @@ function ffmpegEngine({ ffmpeg = require('ffmpeg-static') } = {}) {
       return found;
     },
 
-    // The edited video, as an MP4 at `out`. sourcePath is the source video's
-    // path or URL (plans keep it relative to the plan file).
-    async render(plan, { sourcePath, out, quality = 'full' }) {
-      const { warnings } = checked(plan);
+    // What happens on a recording's picture, on the main recording's clock:
+    // blank stretches (black, like a screen share that hasn't started) and
+    // moments the picture changes a lot (a new slide, window or page).
+    async activity(video, { offsetSec = 0, minBlankSec = 1, change = 0.3 } = {}) {
+      const { stderr } = await ff(['-i', video, '-an', '-vf', `scale=320:-2,blackdetect=d=${minBlankSec}:pix_th=0.1,select='gt(scene,${change})',showinfo`, '-f', 'null', '-']);
+      const at = (t) => Math.round((Number(t) + offsetSec) * 1000) / 1000;
+      const blank = [...stderr.matchAll(/black_start:([\d.]+) black_end:([\d.]+)/g)].map((m) => ({ from: at(m[1]), to: at(m[2]) }));
+      const changes = [...stderr.matchAll(/\] n:\s*\d+ pts:\s*\d+ pts_time:([\d.]+)/g)].map((m) => at(m[1]));
+      return { blank, changes };
+    },
+
+    // The edited video, as an MP4 at `out`. paths are each recording's path or
+    // URL by name ("speaker" and the plan's sources).
+    async render(fullPlan, { paths, out, quality = 'full', suggestions = false }) {
+      const { warnings } = checked(fullPlan);
+      const plan = included(fullPlan, { suggestions });
       const q = QUALITY[quality];
       const tl = timeline(plan);
-      const size = outputSize(plan.source, q.maxPx);
-      const hasAudio = plan.source.hasAudio !== false;
+      const canvas = outputSize(plan.source, q.maxPx);
+      const audio = plan.source.hasAudio !== false;
+      const inputs = { [MAIN]: 0 };
+      sourcesShown(plan).forEach((name, i) => (inputs[name] = i + 2));
       return inTemp(async (dir) => {
-        await fs.writeFile(path.join(dir, 'texts.ass'), buildAss(tl.texts, size));
+        await fs.writeFile(path.join(dir, 'texts.ass'), buildAss(tl.texts, canvas));
         await fs.writeFile(path.join(dir, 'chapters.txt'), buildChapterMetadata(tl.chapters, tl.durationSec));
         const started = Date.now();
+        const sourceArgs = Object.keys(inputs).filter((name) => name !== MAIN).flatMap((name) => ['-i', paths[name]]);
         await ff(
           [
             '-y', '-loglevel', 'error',
-            '-i', sourcePath,
+            '-i', paths[MAIN],
             '-i', 'chapters.txt',
-            '-filter_complex', buildFilter({ segments: tl.segments, size, hasAudio }),
-            '-map', '[v]', ...(hasAudio ? ['-map', '[a]'] : []),
+            ...sourceArgs,
+            '-filter_complex', buildGraph(plan, { canvas, fps: fpsOf(plan), inputs, segments: tl.segments, audio }),
+            '-map', '[v]', ...(audio ? ['-map', '[a]'] : []),
             // The chapters file's metadata carries the chapter titles.
             '-map_metadata', '1', '-map_chapters', '1',
             '-c:v', 'libx264', '-preset', q.preset, '-crf', q.crf,
-            ...(hasAudio ? ['-c:a', 'aac', '-b:a', '160k'] : []),
+            ...(audio ? ['-c:a', 'aac', '-b:a', '160k'] : []),
             '-movflags', '+faststart',
             path.resolve(out),
           ],
           { cwd: dir }
         );
-        return { out: path.resolve(out), durationSec: tl.durationSec, ...size, seconds: (Date.now() - started) / 1000, warnings };
+        const suggestionsShown = suggestions ? suggestionsOf(fullPlan).length : 0;
+        return { out: path.resolve(out), durationSec: tl.durationSec, ...canvas, seconds: (Date.now() - started) / 1000, suggestionsShown, warnings };
       });
     },
 
-    // One frame of the edited video, at source time `at`, as a JPEG at `out`:
-    // what the edit looks like there, texts included.
-    async frame(plan, { sourcePath, at, out, quality = 'low' }) {
+    // One frame of the edited video, at main-recording time `at`, as a JPEG
+    // at `out`: what the edit looks like there, suggestions included.
+    async frame(plan, { paths, at, out, quality = 'low', suggestions = true }) {
       checked(plan);
-      const segments = keptSegments(plan);
+      const p = included(plan, { suggestions });
+      const segments = keptSegments(p);
       const pos = toOutputTime(segments, at);
-      if (!pos) throw new PlanError(`${at}s is after the end of the recording`);
+      if (at > p.source.durationSec) throw new PlanError(`${at}s is after the end of the recording`);
+      if (!pos) throw new PlanError(`${at}s is cut out, with the rest of the recording after it`);
       if (pos.cut) {
         const next = segments.find((s) => s.from > at);
         throw new PlanError(`${at}s is cut out${next ? `; the video carries on at ${next.from}s` : ''}`);
       }
-      const tl = timeline(plan);
-      const size = outputSize(plan.source, QUALITY[quality].maxPx);
+      const tl = timeline(p);
+      const fps = fpsOf(p);
+      const canvas = outputSize(p.source, QUALITY[quality].maxPx);
+      const inputs = { [MAIN]: 0 };
+      sourcesShown(p).forEach((name, i) => (inputs[name] = i + 1));
+      // Start reading a little before, so the frame is exact.
+      const seekFrom = Math.max(0, at - 1);
+      const seekArgs = (name) => ['-ss', String(Math.max(0, seekFrom - (name === MAIN ? 0 : p.sources[name].offsetSec))), '-i', paths[name]];
       return inTemp(async (dir) => {
-        await fs.writeFile(path.join(dir, 'texts.ass'), buildAss(tl.texts, size));
+        await fs.writeFile(path.join(dir, 'texts.ass'), buildAss(tl.texts, canvas));
         await ff(
           [
             '-y', '-loglevel', 'error',
-            '-ss', String(at), '-i', sourcePath,
-            '-frames:v', '1',
-            '-vf', `scale=${size.width}:${size.height},setsar=1,setpts=PTS-STARTPTS+${pos.time}/TB,ass=texts.ass:fontsdir=fonts`,
-            '-q:v', '3',
+            ...Object.keys(inputs).flatMap(seekArgs),
+            '-filter_complex', buildGraph(p, { canvas, fps, inputs, seekFrom, segments: [{ from: at, to: at + 3 / fps }], shift: pos.time }),
+            '-map', '[v]', '-frames:v', '1', '-q:v', '3',
             path.resolve(out),
           ],
           { cwd: dir }
         );
-        return { out: path.resolve(out), at, outputAt: pos.time, ...size };
+        return { out: path.resolve(out), at, outputAt: pos.time, ...canvas };
+      });
+    },
+
+    // A recording's own picture at main-recording time `at` (not the edit),
+    // with a grid labelled 0.1 … 0.9 when grid is set, to work out where
+    // things are on it (say, for a zoom's rect).
+    async look(plan, { paths, source = MAIN, at, out, grid = true }) {
+      const info = source === MAIN ? plan.source : plan.sources[source];
+      if (!info) throw new PlanError(`There's no "${source}" recording`);
+      const t = at - (info.offsetSec || 0);
+      if (t < 0 || t > info.durationSec) throw new PlanError(`The ${source} recording doesn’t cover ${at}s`);
+      const size = outputSize(info, 1280);
+      return inTemp(async (dir) => {
+        await fs.writeFile(path.join(dir, 'grid.ass'), buildGridAss(size));
+        await ff(['-y', '-loglevel', 'error', '-ss', String(t), '-i', paths[source], '-frames:v', '1', '-vf', `scale=${size.width}:${size.height}${grid ? ',ass=grid.ass:fontsdir=fonts' : ''}`, '-q:v', '3', path.resolve(out)], { cwd: dir });
+        return { out: path.resolve(out), source, at, ...size, grid };
       });
     },
   };
 }
 
-module.exports = { ffmpegEngine, buildAss, buildFilter, buildChapterMetadata, outputSize, assTime };
+module.exports = { ffmpegEngine, buildAss, buildGraph, buildChapterMetadata, zoomExpressions, outputSize, assTime };
