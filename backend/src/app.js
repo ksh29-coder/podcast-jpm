@@ -15,19 +15,23 @@ const { createStore } = require('./store');
 const { muxVideo } = require('./video');
 const { createPush } = require('./push');
 const { ffmpegEditor } = require('./edit');
+const { ffmpegEngine } = require('./edit-engine/ffmpeg');
+const { createListening } = require('./listening');
+const { createStats } = require('./stats');
 
 const MEDIA_DIR = path.join(__dirname, '..', 'public', 'media');
 
 // Express 4 doesn't catch rejected promises from handlers.
 const ah = (fn) => (req, res, next) => fn(req, res, next).catch(next);
 
-function createApp({ db = connect(), video = muxVideo(), ai = openRouterAi(), transcriber = openRouterTranscriber(), voice = openAiVoice(), editor = ffmpegEditor(), background, tint, mediaDir = MEDIA_DIR, auth = authMiddleware(), hostPasscode, cleanUpEveryMs, sendPush } = {}) {
+function createApp({ db = connect(), video = muxVideo(), ai = openRouterAi(), transcriber = openRouterTranscriber(), voice = openAiVoice(), editor = ffmpegEditor(), engine = ffmpegEngine(), background, tint, mediaDir = MEDIA_DIR, auth = authMiddleware(), hostPasscode, cleanUpEveryMs, sendPush } = {}) {
   const app = express();
-  const store = createStore({ db, video, ai, transcriber, editor, ...(background && { background }), ...(tint && { tint }), ...(cleanUpEveryMs !== undefined && { cleanUpEveryMs }) });
+  const store = createStore({ db, video, ai, transcriber, editor, engine, ...(background && { background }), ...(tint && { tint }), ...(cleanUpEveryMs !== undefined && { cleanUpEveryMs }) });
   const later = background ?? inBackground;
   const push = createPush({ db, ...(sendPush && { send: sendPush }) });
   const engagement = createEngagement({ db, push, later });
   const activity = createActivity({ db });
+  const stats = createStats({ db });
 
   // Tables are created (and seeded) on first use, so a fresh database needs no
   // separate setup step. Retried on the next request if it fails.
@@ -73,7 +77,7 @@ function createApp({ db = connect(), video = muxVideo(), ai = openRouterAi(), tr
   app.use('/media', express.static(mediaDir, { fallthrough: false }));
 
   app.use('/api', ensureDb);
-  app.use('/api/host', hostRouter({ store, engagement, push, later, baseUrl, passcode: hostPasscode, db }));
+  app.use('/api/host', hostRouter({ store, engagement, stats, push, later, baseUrl, passcode: hostPasscode, db }));
   app.use('/api/items', engagement.router());
   app.use('/api/me', meRouter({ store, engagement, activity, push, baseUrl }));
   app.use('/api/assistant', assistantRouter({ db, store, voice, baseUrl }));
@@ -181,6 +185,9 @@ function createApp({ db = connect(), video = muxVideo(), ai = openRouterAi(), tr
       res.json({ positionSec: rows[0].position_sec, updatedAt: new Date(rows[0].updated_at).toISOString() });
     })
   );
+
+  // Listening sessions and Shorts views, for hosts' stats (listening.js).
+  app.use('/api', createListening({ db }).router());
 
   app.use((err, req, res, next) => {
     if (err.expose) return res.status(err.status).json({ error: err.message });

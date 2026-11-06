@@ -15,6 +15,7 @@ const SECTIONS: { title: string; body: string[] }[] = [
       'The name you choose to show on your posts and comments.',
       'Videos you post, with their title, description, tags, and a transcript of what’s said; your comments; likes, views and listening progress; reports you make.',
       'How many minutes you talk to the voice assistant each day (for the daily limit). We don’t record the conversation.',
+      'How you listen, so hosts can see how episodes do: which parts of an episode you played, where you stopped, whether you listened or watched, on which kind of device, where you started it from (like Home or Search), and how long you watched each Short.',
     ],
   },
   {
@@ -30,12 +31,14 @@ const SECTIONS: { title: string; body: string[] }[] = [
     body: [
       'Anything you post is seen by a host first, and by everyone using the app once approved, with your chosen name.',
       'Hosts see posts waiting for review, reports, and an AI check of what’s said. They don’t see your device ID.',
+      'Hosts see listening only as totals for each episode and Short, like how many people listened and where most stopped. They never see who listened, and nothing is shown for fewer than 5 people.',
     ],
   },
   {
     title: 'Deleting',
     body: [
       'Delete your posts any time from Me: the video, its likes, views and comments go with it. Posts a host doesn’t approve, and uploads you never post, are deleted after 7 days.',
+      'How you listened is deleted after 13 months; only totals (plays and time listened) are kept.',
       `To have everything linked to your device removed, email ${CONTACT}.`,
     ],
   },
@@ -46,7 +49,7 @@ export default function Privacy() {
   return (
     <ScrollView style={{ backgroundColor: colors.bg }} contentContainerStyle={styles.page} contentInsetAdjustmentBehavior="automatic">
       <Text style={type.display}>Privacy</Text>
-      <Text style={type.footnote}>AI Wave · Last updated 22 October 2026</Text>
+      <Text style={type.footnote}>AI Wave · Last updated 6 November 2026</Text>
       {SECTIONS.map((s) => (
         <View key={s.title} style={styles.section}>
           <Text style={type.headline}>{s.title}</Text>

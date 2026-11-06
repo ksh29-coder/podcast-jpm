@@ -6,6 +6,7 @@ import { router, useRootNavigationState } from 'expo-router';
 import { refreshActivity } from './activity';
 import { api } from './api';
 import { getItem, setItem } from './storage';
+import { noteSource } from './listening';
 
 // Phone alerts (Expo push): replies, comments on your posts, hosts' reviews
 // and new episodes. The app asks once, right after someone posts a Short or a
@@ -65,6 +66,7 @@ export function useAlerts() {
   useEffect(() => {
     if (!ready || !tapped || opened.current === tapped.id) return;
     opened.current = tapped.id;
+    noteSource('notification');
     router.push(tapped.url as never);
   }, [ready, tapped]);
 }

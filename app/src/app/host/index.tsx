@@ -47,6 +47,10 @@ export default function HostHome() {
     >
       {error && <Text style={ui.error}>{error}</Text>}
 
+      <Pressable style={[ui.button, ui.secondary, { alignSelf: 'flex-start' }]} onPress={() => router.push('/host/stats')}>
+        <Text style={ui.secondaryText}>Listening stats</Text>
+      </Pressable>
+
       <Text style={[ui.section, { marginTop: 0 }]}>To review{toReview.length ? ` (${toReview.length})` : ''}</Text>
       {toReview.length === 0 ? (
         <Text style={ui.hint}>Nothing waiting. New posts from the app and website show up here.</Text>

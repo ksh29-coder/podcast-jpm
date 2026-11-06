@@ -7,6 +7,7 @@ import { loadVoice, saveVoice, VOICES } from '../components/assistant/voices';
 import { Icon } from '../components/Icon';
 import { formatTime } from '../lib/format';
 import { colors, radius, spacing, type } from '../theme';
+import { openEpisode } from '../lib/openEpisode';
 
 const LABEL: Record<AssistantState, string> = {
   connecting: 'Connecting…',
@@ -51,8 +52,8 @@ function Conversation({ voice, onVoice }: { voice: string; onVoice: (v: string) 
   const open = (card: Card) => {
     stop();
     router.back();
-    if (card.kind === 'episode') router.push(`/episode/${card.id}`);
-    else if (card.kind === 'moment') router.push(`/episode/${card.id}?t=${Math.round(card.startSec)}`);
+    if (card.kind === 'episode') openEpisode('assistant', `/episode/${card.id}`);
+    else if (card.kind === 'moment') openEpisode('assistant', `/episode/${card.id}?t=${Math.round(card.startSec)}`);
     else router.push(process.env.EXPO_OS === 'web' ? `/shorts?id=${card.id}` : '/shorts');
   };
 

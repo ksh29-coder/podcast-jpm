@@ -1,20 +1,20 @@
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useHost } from '../../../components/host/HostGate';
 import { Schedule } from '../../../components/host/Schedule';
+import { EpisodeStats } from '../../../components/host/stats/EpisodeStats';
 import { ui } from '../../../components/host/ui';
 import { formatTime, parseChapters, parseTime } from '../../../lib/format';
-import { parseTags, videoLabel, type HostEpisode, type Reach } from '../../../lib/host';
-import { colors, radius, spacing, type } from '../../../theme';
+import { parseTags, videoLabel, type HostEpisode } from '../../../lib/host';
+import { colors, spacing, type } from '../../../theme';
 
 // Edit an episode after upload: details, chapters, tags, cover frame,
-// speaker names, and when it goes live. Also shows how far people got.
+// speaker names, and when it goes live. Also shows its listening stats.
 export default function EditEpisode() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { api } = useHost();
   const [episode, setEpisode] = useState<HostEpisode | null>(null);
-  const [reach, setReach] = useState<Reach | null>(null);
   const [form, setForm] = useState({ title: '', description: '', chapters: '', tags: '', cover: '', speakers: {} as Record<string, string> });
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ text: string; error?: boolean } | null>(null);
@@ -34,7 +34,6 @@ export default function EditEpisode() {
       },
       (e) => setMessage({ text: e instanceof Error ? e.message : String(e), error: true })
     );
-    api.reach(id).then(setReach, () => setReach(null));
   }, [api, id]);
 
   if (!episode) {
@@ -144,28 +143,16 @@ export default function EditEpisode() {
           <Pressable style={[ui.button, ui.secondary]} onPress={() => router.push(`/host/ai/${episode.id}`)}>
             <Text style={ui.secondaryText}>AI assist</Text>
           </Pressable>
+          {Platform.OS === 'web' && episode.video && (
+            <Pressable style={[ui.button, ui.secondary]} onPress={() => router.push(`/host/edit/${episode.id}`)}>
+              <Text style={ui.secondaryText}>Edit video</Text>
+            </Pressable>
+          )}
         </View>
       </Section>
 
-      <Section title="How far people got">
-        {!reach || reach.listeners === 0 ? (
-          <Text style={ui.hint}>No listeners yet.</Text>
-        ) : (
-          <>
-            <Text style={ui.hint}>
-              Of {reach.listeners} {reach.listeners === 1 ? 'person' : 'people'} who started it, the share who reached each point.
-            </Text>
-            {reach.points.map((p) => (
-              <View key={p.percent} style={styles.bar} accessible accessibilityLabel={`${Math.round(p.share * 100)}% reached ${formatTime(p.atSec)}`}>
-                <Text style={[type.caption, styles.barLabel]}>{p.percent === 100 ? 'End' : formatTime(p.atSec)}</Text>
-                <View style={styles.track}>
-                  <View style={[styles.fill, { width: `${Math.max(2, p.share * 100)}%` }]} />
-                </View>
-                <Text style={[type.caption, styles.barValue]}>{Math.round(p.share * 100)}%</Text>
-              </View>
-            ))}
-          </>
-        )}
+      <Section title="Listening stats">
+        <EpisodeStats episodeId={episode.id} chapters={episode.chapters} />
       </Section>
     </ScrollView>
   );
@@ -182,9 +169,4 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 const styles = StyleSheet.create({
   section: { gap: spacing.sm, paddingTop: spacing.lg, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
-  bar: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  barLabel: { width: 44, fontVariant: ['tabular-nums'] },
-  barValue: { width: 40, textAlign: 'right', fontVariant: ['tabular-nums'] },
-  track: { flex: 1, height: 10, borderRadius: radius.sm, backgroundColor: colors.card, overflow: 'hidden' },
-  fill: { height: 10, borderRadius: radius.sm, backgroundColor: colors.highlight },
 });

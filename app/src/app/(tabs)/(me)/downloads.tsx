@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
-import { router } from 'expo-router';
 import { EpisodeRow } from '../../../components/EpisodeRow';
 import { ErrorState } from '../../../components/ErrorState';
 import { Icon } from '../../../components/Icon';
@@ -9,6 +8,7 @@ import { deleteDownload, downloadedSize, downloadEpisode, downloadsSupported } f
 import { usePlayer } from '../../../lib/player';
 import { colors, spacing, type } from '../../../theme';
 import { useFetch } from '../../../lib/useFetch';
+import { openEpisode } from '../../../lib/openEpisode';
 
 export default function DownloadsScreen() {
   const { data, error, reload } = useFetch(api.episodes);
@@ -60,7 +60,7 @@ export default function DownloadsScreen() {
           <EpisodeRow
             episode={item}
             positionSec={progress[item.id]?.positionSec}
-            onPress={() => router.push(`/episode/${item.id}`)}
+            onPress={() => openEpisode('downloads', `/episode/${item.id}`)}
             right={
               <Pressable
                 onPress={() => toggle(item)}

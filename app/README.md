@@ -43,6 +43,19 @@ two-column episode page, and **New**, where anyone can post a Short (trimmed to 
 whole episode from a video file. `/host` is the **Host Studio**: Review, Episodes, Shorts, and
 uploading. Narrow windows get a bottom bar instead of the sidebar.
 
+**Edit video** (Host Studio → Episodes, or an episode's page; website only) edits an episode's
+video before it goes live. It plays the original upload with a live preview of the edit:
+- **Cuts**: select on the timeline or by dragging across words in the transcript (or I / O while
+  playing), then Cut (X). *Find things to cut* finds filler words (um, uh…) and long pauses and
+  cuts them all at once.
+- **Text on screen**: name tags, title cards, captions and corner labels.
+- **Screen share & layouts**: add the screen recording (Zoom's "shared screen" file lines up by
+  itself), then choose what fills the picture when (screen + speaker in a corner, screen, side by
+  side), or "use whenever the screen is shared"; draw zoom areas on the screen.
+- Undo / redo (⌘Z / ⇧⌘Z), saved as you go; **Make edited video** has the server make it. The
+  episode's chapters, cover image and transcript move with the cuts, and the original is kept, so
+  cut parts can come back. Live episodes must be unpublished first.
+
 `npx expo start --web` runs it locally, with the backend at `http://localhost:3000`
 by default.
 

@@ -31,12 +31,112 @@ npm test
 | POST | `/api/assistant/session` | A short-lived key for one voice conversation (OpenAI Realtime, `OPENAI_API_KEY`), within the daily limit |
 | POST | `/api/assistant/usage`, `/api/assistant/tools/:name` | How long it lasted; the assistant's tools (search, episode details, latest) |
 | * | `/api/host/*` | Host mode (passcode): uploads, publishing, the review queue for posted Shorts and comments |
+| GET/PUT | `/api/host/episodes/:id/edit` | The website's video editor: the episode's edit plan (cuts, texts, layouts, zooms) with the original upload, its transcript by word and what's been made; save the plan |
+| POST | `/api/host/episodes/:id/edit/make` | Make the edited video from the saved plan (see "Editing episodes" below) |
+| GET | `/api/host/episodes/:id/edit/pauses` | Quiet stretches of the original, worth cutting (found once) |
+| PUT/DELETE | `/api/host/episodes/:id/edit/sources/:name` | Add (`{ videoId, offsetSec }`, uploaded with `kind: "screen"`) or take out another recording, like the screen share |
+| GET | `/api/host/episodes/:id/edit/sources/:name/activity` | When that recording is blank and when its picture changes (found once) |
+| PUT | `/api/listening/:id` | A listening session so far (`{ episodeId, ranges, stopSec, mode, platform, source, speed, downloaded, startedAt }`); each send replaces the last. Live episodes only |
+| PUT | `/api/short-views/:id` | A Short shown in the feed so far (`{ shortId, watchedSec, loops, openedEpisode, platform }`) |
+| GET | `/api/host/stats`, `/api/host/episodes/:id/stats` | Listening stats (`src/stats.js`, definitions in `src/stats-settings.js`): totals only, nothing for fewer than 5 people, refreshed every 15 minutes |
 | GET | `/media/*` | Media files, with HTTP Range support for seeking |
 
 Rejected Shorts and episodes, and uploads nobody posted, are deleted with their videos after 7 days.
 
 Media paths in `data/episodes.json` are server-relative; the API returns them as absolute URLs
 (based on the request host, or `PUBLIC_BASE_URL` if set, e.g. behind a gateway).
+
+## Edit engine (`wave-edit`)
+
+Edits a podcast recording without changing it: an **edit plan** (JSON) lists the cuts, layouts,
+zooms, on-screen texts and chapters, and rendering turns the plan into a new video with ffmpeg.
+It's made for **AI editors first**, with the host deciding: every change can be a suggestion with
+a reason and who made it, which shows in previews but only reaches the final video once accepted.
+The command line prints one JSON object per command and exits 1 with `{ ok: false, error }`
+saying what to fix. The Claude Code skill `.claude/skills/wave-edit` runs it as an editing team.
+
+```sh
+# Set up: Zoom's speaker video, its shared-screen video, and an AI transcript
+npm run edit -- init ep.json --video speaker.mp4
+npm run edit -- add-source ep.json --name screen --video shared-screen.mp4   # --offset if it starts later
+npm run edit -- transcribe ep.json                   # word by word, with speakers
+npm run edit -- speaker ep.json 0 --name "Alice Chen"
+
+# Find
+npm run edit -- transcript ep.json --from 0 --to 300  # lines, speakers, and what's cut
+npm run edit -- search ep.json --text "kubernetes"
+npm run edit -- fillers ep.json                       # um/uh still in the edit
+npm run edit -- silences ep.json --min 1.5            # quiet stretches
+npm run edit -- activity ep.json                      # when the screen share is blank or changes
+npm run edit -- look ep.json --source screen --at 600 --out look.jpg   # the screen, with a grid
+
+# Change (AI editors add: --suggest --by rough-cut --reason "small talk before the show")
+npm run edit -- cut ep.json --from 0 --to 94.2
+npm run edit -- cut ep.json --text "can you see my screen"
+npm run edit -- scene ep.json --from 310 --to 845 --layout screen+speaker
+npm run edit -- zoom ep.json --from 400 --to 460 --rect 0.5,0,0.5,0.5
+npm run edit -- text ep.json --from 95 --to 100 --style lower-third --text "Alice Chen" --subtitle "Platform Engineering"
+npm run edit -- chapter ep.json --at 95 --title "Intro"
+npm run edit -- remove ep.json <id>…
+
+# Review and make
+npm run edit -- suggestions ep.json                   # each in plain words, with why and who
+npm run edit -- accept ep.json <id>… --by host        # or --all; reject the same way
+npm run edit -- frame ep.json --at 96 --out check.jpg # one frame of the edit, suggestions included
+npm run edit -- render ep.json --low --suggestions --out preview.mp4
+npm run edit -- render ep.json --out final.mp4        # accepted changes only
+```
+
+- **Times are seconds of the main (speaker) recording**, for every recording, so a cut never moves
+  anything else; `show` gives where everything lands in the edited video.
+- Changes take `--dry-run`, and a change that would break the plan (a cut past the end, two scenes
+  at once) is refused. Every saved change goes in the plan's `log` with who made it.
+- **Layouts** (`scene`): `speaker` (the default everywhere), `screen`, `screen+speaker` (the speaker
+  small in a corner, `--pip`) and `side-by-side`. The screen share keeps its shape inside the
+  picture. **Zooms** ease in and out over half a second; the rect zooms by its bigger side.
+- Text styles: `lower-third`, `title`, `caption`, `label`, with optional `--x`/`--y` (0–1). Text is
+  drawn by libass in Inter (in `assets/fonts`, SIL Open Font License), so it looks the same anywhere.
+- Chapters are written into the MP4, at their edited times.
+- **Transcripts** come from `transcribe` (MAI-Transcribe through OpenRouter, `OPENROUTER_API_KEY`),
+  which times every word, keeps fillers like "um", and tells speakers apart. They're kept in
+  `<plan>.transcript.json` next to the plan (`import-transcript` reuses one); `transcribe` won't
+  run (and charge) again without `--force`. Audio is transcribed in 40-minute pieces, and each
+  piece numbers its speakers afresh, so in longer recordings speakers are per piece ("1:0" is
+  the first speaker of the second piece) and each needs naming with `speaker`.
+- `cut --text` only cuts words said once in what's left of the edit; otherwise it lists each place
+  so you can pick one with `--from`/`--to`. `fillers` looks for um/uh/erm…; add phrases that are
+  often meant, like "you know", with `--also`.
+- **For AI models in the app**: `wave-edit tools` (or `tools()` from `bin/wave-edit.js`) gives every
+  command as a tool definition (name, description, JSON schema), and `call(name, input)` runs one.
+- Code: `src/edit-engine/plan.js` (the plan, timeline, checks and suggestions; no ffmpeg),
+  `src/edit-engine/ffmpeg.js` (probe, silences, activity, look, frame, render),
+  `src/edit-engine/transcript.js` (transcripts, search, fillers) and `bin/wave-edit.js`.
+
+## Editing episodes (the website's video editor)
+
+The Host Studio's **Edit video** page saves the same edit plan as `wave-edit`, kept with the episode's
+video (`videos.edit_plan`, `src/episode-edit.js`), and **Make edited video** renders it with the same
+engine from the **original upload**, which is kept (`unedited_asset_id`): every edit starts from the
+original, so cut parts can come back, and an empty plan restores it. The new video goes to the video
+service like an upload; the episode's chapters, cover frame and transcript move to its times (the
+transcript is kept in the original's times, by word, for the editor). Episodes that are live can't
+have their video edited, so listeners never find it missing while the new one processes.
+
+The bundled ffmpeg can't look up host names, so the engine downloads links (the video service's
+files) and works on local files.
+
+**Long episodes.** Making an hour-long edit takes far longer than a Vercel function may run (and
+more disk than it has). Run the edit worker on any machine with the API's settings
+(`DATABASE_URL`, `MUX_*`), and set `EDIT_WORKER=external` on the API so it leaves episode edits to it:
+
+```sh
+npm run edit-worker            # keeps checking for edits to make
+npm run edit-worker -- --once  # makes what's waiting, then stops (for a scheduler)
+```
+
+A render in progress says so every minute, so it isn't started again elsewhere; one cut off (the
+worker stopped) is started again after six minutes. Without the worker, edits are made in the API's
+background, which suits short episodes and local use.
 
 ## Deploy to Vercel
 
@@ -50,3 +150,4 @@ Vercel's CDN, which supports Range requests.
   goes in `src/auth.js` (build step 6).
 - **Progress** is kept in memory and lost on restart; on Vercel it can reset between requests.
 - **Media on Vercel** is public CDN content; once auth exists it needs to move behind it.
+- **The edit worker isn't deployed anywhere yet**; until it is, long episode edits won't finish on Vercel.

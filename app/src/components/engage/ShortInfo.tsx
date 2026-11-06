@@ -3,6 +3,7 @@ import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-nati
 import { router } from 'expo-router';
 import type { Short } from '../../lib/api';
 import { formatTime } from '../../lib/format';
+import { markShortOpened } from '../../lib/listening';
 import { colors, radius, spacing, type } from '../../theme';
 import { Icon } from '../Icon';
 import { Tags } from './Tags';
@@ -51,7 +52,10 @@ function EpisodeChip({ short, compact = false }: { short: Short; compact?: boole
   return (
     <Pressable
       style={({ pressed }) => [compact ? styles.chip : styles.cta, pressed && { opacity: 0.8 }]}
-      onPress={() => router.push(short.startSec != null ? `/episode/${short.episodeId}?t=${short.startSec}` : `/episode/${short.episodeId}`)}
+      onPress={() => {
+        markShortOpened(short.id);
+        router.push(short.startSec != null ? `/episode/${short.episodeId}?t=${short.startSec}` : `/episode/${short.episodeId}`);
+      }}
       accessibilityRole="button"
     >
       <Icon name="headphones" size={compact ? 13 : 16} color={compact ? '#fff' : colors.accentText} />

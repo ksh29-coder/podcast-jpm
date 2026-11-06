@@ -35,17 +35,28 @@ function openRouterTranscriber({ apiKey = process.env.OPENROUTER_API_KEY, model 
     return json;
   }
 
-  return {
+  const transcriber = {
     model,
-    // Audio URL -> { cues: [{ startSec, endSec, text, speaker }], cost }
+    // Audio URL -> { cues: [{ startSec, endSec, text, speaker }], words, cost }
     async transcribe(audioUrl) {
-      const ffmpeg = require('ffmpeg-static');
-      const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'stt-'));
+      const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'stt-dl-'));
       try {
         const res = await fetch(audioUrl);
         if (!res.ok) throw Object.assign(new Error(`Couldn’t download the audio (${res.status})`), { status: 502 });
         await fs.writeFile(path.join(dir, 'in'), Buffer.from(await res.arrayBuffer()));
-        await run(ffmpeg, ['-y', '-loglevel', 'error', '-i', path.join(dir, 'in'), '-ac', '1', '-ar', '16000', '-b:a', '48k', '-f', 'segment', '-segment_time', String(PIECE_SEC), path.join(dir, 'piece-%03d.mp3')]);
+        return await transcriber.transcribeFile(path.join(dir, 'in'));
+      } finally {
+        await fs.rm(dir, { recursive: true, force: true });
+      }
+    },
+
+    // The same for a file on this machine (audio or video). words are
+    // [{ word, start, end, speaker }], for edits finer than a line.
+    async transcribeFile(file) {
+      const ffmpeg = require('ffmpeg-static');
+      const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'stt-'));
+      try {
+        await run(ffmpeg, ['-y', '-loglevel', 'error', '-i', file, '-vn', '-ac', '1', '-ar', '16000', '-b:a', '48k', '-f', 'segment', '-segment_time', String(PIECE_SEC), path.join(dir, 'piece-%03d.mp3')]);
         const pieces = (await fs.readdir(dir)).filter((f) => f.startsWith('piece-')).sort();
 
         const words = [];
@@ -58,12 +69,13 @@ function openRouterTranscriber({ apiKey = process.env.OPENROUTER_API_KEY, model 
           // Some providers return only segments; treat each as one "word".
           if (!out.words?.length) for (const s of out.segments || []) words.push({ word: s.text, start: s.start + offset, end: s.end + offset, speaker: s.speaker });
         }
-        return { cues: wordsToCues(words), cost };
+        return { cues: wordsToCues(words), words, cost };
       } finally {
         await fs.rm(dir, { recursive: true, force: true });
       }
     },
   };
+  return transcriber;
 }
 
 // Words -> read-along lines: a new line at the end of a sentence, when the
@@ -106,4 +118,4 @@ function cuesToVtt(cues) {
   return `WEBVTT\n\n${cues.map((c) => `${stamp(c.startSec)} --> ${stamp(c.endSec)}\n${c.text}`).join('\n\n')}\n`;
 }
 
-module.exports = { openRouterTranscriber, wordsToCues, cuesToVtt };
+module.exports = { openRouterTranscriber, wordsToCues, cuesToVtt, PIECE_SEC };

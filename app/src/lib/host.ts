@@ -41,8 +41,6 @@ export type VideoState = {
 // publishedAt is in the future while a release is scheduled.
 type HostFields = { status: Status; video: VideoState | null; createdAt: string; publishedAt: string | null };
 
-// Of everyone who started an episode, how many reached each tenth of it.
-export type Reach = { listeners: number; durationSec: number; points: { percent: number; atSec: number; listeners: number; share: number }[] };
 // The AI's check of what's said in something posted from the app or website.
 export type AiCheck = { status: 'none' | 'generating' | 'ready' | 'unavailable'; concerns: string[] } | null;
 
@@ -74,6 +72,111 @@ export type HostShort = Clip &
     reviewNote: string | null;
     aiCheck: AiCheck;
   };
+
+// Editing an episode's video on the website: the edit plan (see the backend's
+// edit-engine/plan.js), in seconds of the original upload.
+export type EditItem = { id: string; from: number; to: number; reason?: string; by?: string; state?: 'suggested' };
+export type EditCut = EditItem;
+export type TextStyleName = 'lower-third' | 'title' | 'caption' | 'label';
+export type EditText = EditItem & { style: TextStyleName; text: string; subtitle?: string; x?: number; y?: number };
+export type Layout = 'speaker' | 'screen' | 'screen+speaker' | 'side-by-side';
+export type EditScene = EditItem & { layout: Layout; source?: string; pip?: 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left' };
+export type EditZoom = EditItem & { source: string; rect: [number, number, number, number] };
+export type EditSource = { video: string; durationSec: number; width?: number; height?: number; offsetSec: number };
+export type EditPlan = {
+  version: 1;
+  source: { video: string; durationSec: number; hasAudio?: boolean };
+  sources: Record<string, EditSource>;
+  cuts: EditCut[];
+  texts: EditText[];
+  scenes: EditScene[];
+  zooms: EditZoom[];
+  chapters: unknown[];
+};
+export type Pause = { from: number; to: number; durationSec: number };
+export type EpisodeEdit = {
+  plan: EditPlan;
+  // The original upload: the plan's times are its times.
+  videoUrl: string | null;
+  posterUrl: string | null;
+  durationSec: number;
+  // Why the video can't be edited now (say, it's live), or null.
+  locked: string | null;
+  // changed: saved changes the episode's video doesn't have yet;
+  // processing: the edited video is made and processing at the video service.
+  edit: { status: EditStatus; error: string | null; changed: boolean; processing: boolean };
+  transcript: {
+    status: string;
+    lines: { startSec: number; endSec: number; text: string; speaker: number | null }[];
+    // [text, start, end], when the speech-to-text service made the transcript.
+    words: [string, number, number][] | null;
+    speakers: Record<string, string>;
+  };
+  pauses: Pause[] | null;
+  // Other recordings (like the screen share), to play beside the original.
+  sources: Record<string, { videoId: string; url: string | null; offsetSec: number; durationSec: number }>;
+};
+export type Activity = { blank: { from: number; to: number }[]; changes: number[] };
+
+// Listening stats (the backend's stats.js): totals only, and null wherever a
+// figure would be based on fewer than 5 people.
+export type StatsDefinitions = {
+  PLAY_SEC: number;
+  ENGAGED_SHARE: number;
+  ENGAGED_SEC: number;
+  COMPLETED_SHARE: number;
+  SWIPED_SEC: number;
+  FIRST_DAYS: number;
+  MIN_PEOPLE: number;
+  REFRESH_MIN: number;
+};
+export type Headline =
+  | { enough: false; complete?: boolean }
+  | {
+      enough: true;
+      plays: number;
+      listeners: number;
+      engaged: number | null;
+      completed: number | null;
+      completionRate: number;
+      timeListenedSec: number;
+      avgConsumption: number | null;
+      fromShorts: { listeners: number | null; onlyShorts: number | null; timeSec: number };
+      // First days only: whether they're over.
+      complete?: boolean;
+    };
+export type Span = { fromSec: number; toSec: number };
+export type SplitRow = { key: string; listeners: number | null; timeSec?: number };
+export type EpisodeStats = {
+  durationSec: number;
+  refreshedAt: string;
+  all: Headline;
+  firstDays: Headline | null;
+  // Share of listeners who heard each of 100 points across the episode.
+  retention?: number[];
+  retentionFromShorts?: number[] | null;
+  stopped?: (Span & { people: number; share: number })[];
+  moments?: {
+    intro: { atSec: number; share: number };
+    skipped: (Span & { people: number })[];
+    replayed: (Span & { people: number })[];
+    drops: (Span & { fromShare: number; toShare: number })[];
+  };
+  splits?: { mode: SplitRow[]; platform: SplitRow[]; source: SplitRow[]; audience: SplitRow[] };
+  definitions: StatsDefinitions;
+};
+export type ShortStats = { id: string; title: string; episodeId: string | null; lengthSec: number } & (
+  | { enough: false }
+  | { enough: true; views: number; viewers: number; viewedShare: number; swipedShare: number; avgWatchedShare: number | null; loops: number; openedEpisode: number }
+);
+export type ShowStats = {
+  refreshedAt: string;
+  totals: { listeners: number; plays: number; timeListenedSec: number } | null;
+  weeks: { week: string; listeners: number | null; plays: number | null; timeSec: number | null }[];
+  episodes: { id: string; title: string; publishedAt: string | null; durationSec: number; all: Headline; firstDays: Headline | null }[];
+  shorts: ShortStats[];
+  definitions: StatsDefinitions;
+};
 
 export const MAX_SHORT_SEC = 90;
 
@@ -109,7 +212,7 @@ export function hostApi(passcode: string) {
 
   return {
     session: () => call<{ ok: true }>('GET', '/session'),
-    createUpload: (kind: 'episode' | 'short') => call<{ videoId: string; uploadUrl: string }>('POST', '/uploads', { kind }),
+    createUpload: (kind: 'episode' | 'short' | 'screen') => call<{ videoId: string; uploadUrl: string }>('POST', '/uploads', { kind }),
     video: (id: string) => call<VideoState>('GET', `/videos/${id}`),
     episodes: () => call<HostEpisode[]>('GET', '/episodes'),
     episode: (id: string) => call<HostEpisode>('GET', `/episodes/${id}`),
@@ -145,7 +248,15 @@ export function hostApi(passcode: string) {
       call<HostShort>('PATCH', `/shorts/${id}`, body),
     shortCaptions: (id: string) => call<Captions>('GET', `/shorts/${id}/captions`),
     saveShortCaptions: (id: string, cues: Cue[]) => call<Captions>('PUT', `/shorts/${id}/captions`, { cues }),
-    reach: (id: string) => call<Reach>('GET', `/episodes/${id}/reach`),
+    episodeStats: (id: string) => call<EpisodeStats>('GET', `/episodes/${id}/stats`),
+    stats: () => call<ShowStats>('GET', '/stats'),
+    episodeEdit: (id: string) => call<EpisodeEdit>('GET', `/episodes/${id}/edit`),
+    saveEpisodeEdit: (id: string, plan: EditPlan) => call<{ plan: EditPlan; warnings: string[] }>('PUT', `/episodes/${id}/edit`, { plan }),
+    makeEpisodeEdit: (id: string) => call<{ status: EditStatus }>('POST', `/episodes/${id}/edit/make`),
+    episodePauses: (id: string) => call<Pause[]>('GET', `/episodes/${id}/edit/pauses`),
+    setEditSource: (id: string, name: string, body: { videoId: string; offsetSec: number }) => call<{ plan: EditPlan }>('PUT', `/episodes/${id}/edit/sources/${name}`, body),
+    removeEditSource: (id: string, name: string) => call<{ plan: EditPlan }>('DELETE', `/episodes/${id}/edit/sources/${name}`),
+    sourceActivity: (id: string, name: string) => call<Activity>('GET', `/episodes/${id}/edit/sources/${name}/activity`),
     comments: () => call<HostComment[]>('GET', '/comments'),
     setCommentStatus: (id: string, status: 'approved' | 'rejected') => call<void>('PATCH', `/comments/${id}`, { status }),
   };
@@ -165,7 +276,7 @@ export function videoLabel(v: VideoState | null, { needsAudio = false } = {}) {
   if (!v) return null;
   if (v.status === 'errored') return `Failed: ${v.error || 'processing error'}`;
   if (v.status === 'uploading') return 'Waiting for upload';
-  if (v.edit?.status === 'queued' || v.edit?.status === 'rendering') return 'Adding pictures…';
+  if (v.edit?.status === 'queued' || v.edit?.status === 'rendering') return needsAudio ? 'Making the edited video…' : 'Adding pictures…';
   if (v.status === 'processing') return 'Processing video…';
   if (needsAudio && !v.audioReady && v.hasAudio !== false) return 'Preparing audio…';
   return null;

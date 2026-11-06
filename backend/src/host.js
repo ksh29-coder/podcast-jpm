@@ -106,7 +106,7 @@ function chapters(value) {
   }));
 }
 
-function hostRouter({ store, engagement, push, later, baseUrl, passcode, db }) {
+function hostRouter({ store, engagement, stats, push, later, baseUrl, passcode, db }) {
   const r = express.Router();
   r.use(requireHost(passcode, db));
   const by = () => 'host';
@@ -119,7 +119,7 @@ function hostRouter({ store, engagement, push, later, baseUrl, passcode, db }) {
     '/uploads',
     ah(async (req, res) => {
       const kind = req.body?.kind;
-      if (!['episode', 'short'].includes(kind)) throw httpError(400, 'kind must be "episode" or "short"');
+      if (!['episode', 'short', 'screen'].includes(kind)) throw httpError(400, 'kind must be "episode", "short" or "screen"');
       res.status(201).json(await store.createUpload({ kind }));
     })
   );
@@ -186,14 +186,14 @@ function hostRouter({ store, engagement, push, later, baseUrl, passcode, db }) {
     })
   );
 
-  // How far people got: of everyone who started the episode, the share who
-  // reached each tenth of it.
+  // Listening stats (stats.js): totals only, never who.
+  r.get('/stats', ah(async (req, res) => res.json(await stats.show())));
   r.get(
-    '/episodes/:id/reach',
+    '/episodes/:id/stats',
     ah(async (req, res) => {
-      const reach = await store.reach(req.params.id);
-      if (!reach) throw httpError(404, 'Episode not found');
-      res.json(reach);
+      const found = await stats.episode(req.params.id);
+      if (!found) throw httpError(404, 'Episode not found');
+      res.json(found);
     })
   );
 
@@ -214,6 +214,29 @@ function hostRouter({ store, engagement, push, later, baseUrl, passcode, db }) {
       res.json(await store.getEpisode(req.params.id, baseUrl(req), { host: true }));
     })
   );
+
+  // Editing the episode's video on the website: the edit plan (cuts, texts,
+  // layouts, zooms; see episode-edit.js), saved as it's edited and made into
+  // the new video when the host asks.
+  r.get('/episodes/:id/edit', ah(async (req, res) => res.json(await store.episodeEdit(req.params.id))));
+  r.put('/episodes/:id/edit', ah(async (req, res) => res.json(await store.saveEpisodeEdit(req.params.id, req.body?.plan))));
+  r.post('/episodes/:id/edit/make', ah(async (req, res) => res.status(202).json(await store.makeEpisodeEdit(req.params.id))));
+  r.get('/episodes/:id/edit/pauses', ah(async (req, res) => res.json(await store.episodePauses(req.params.id))));
+  // Another recording for the edit, like the screen share: upload it with
+  // kind "screen", then add it here once processed.
+  r.put(
+    '/episodes/:id/edit/sources/:name',
+    ah(async (req, res) =>
+      res.json(
+        await store.setEditSource(req.params.id, req.params.name, {
+          videoId: str(req.body?.videoId, 'videoId', { required: true }),
+          offsetSec: num(req.body?.offsetSec, 'offsetSec') ?? 0,
+        })
+      )
+    )
+  );
+  r.delete('/episodes/:id/edit/sources/:name', ah(async (req, res) => res.json(await store.removeEditSource(req.params.id, req.params.name))));
+  r.get('/episodes/:id/edit/sources/:name/activity', ah(async (req, res) => res.json(await store.editSourceActivity(req.params.id, req.params.name))));
 
   r.get('/shorts', ah(async (req, res) => res.json(await engagement.withStats('short', await store.hostShorts(baseUrl(req)), 'host'))));
 

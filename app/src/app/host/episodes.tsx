@@ -41,6 +41,11 @@ export default function StudioEpisodes() {
                     <Text style={ui.secondaryText}>Make a Short</Text>
                   </Pressable>
                 )}
+                {Platform.OS === 'web' && ep.video && (ep.video.status === 'ready' || ep.video.edit?.status === 'ready') && (
+                  <Pressable style={[ui.button, ui.secondary]} onPress={() => router.push(`/host/edit/${ep.id}`)}>
+                    <Text style={ui.secondaryText}>Edit video</Text>
+                  </Pressable>
+                )}
                 {ep.video?.status === 'ready' && (
                   <Pressable style={[ui.button, ui.secondary]} onPress={() => router.push(`/host/ai/${ep.id}`)}>
                     <Text style={ui.secondaryText}>{ep.ai ? 'AI suggestions' : 'AI assist'}</Text>

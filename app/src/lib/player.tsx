@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import { setAudioModeAsync, useAudioPlayer, useAudioPlayerStatus, type AudioStatus } from 'expo-audio';
 import { api, type Episode, type Progress } from './api';
 import { localAudioUri } from './downloads';
+import { sendWaiting, useListeningTracker } from './listening';
 import { getItem, setItem } from './storage';
 
 const SAVE_EVERY_SEC = 10;
@@ -51,6 +52,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const [sleep, setSleepState] = useState<Sleep>(null);
   const [sleepLeftSec, setSleepLeftSec] = useState<number | null>(null);
   const statusRef = useRef(status);
+  // Listening sessions for hosts' stats (listening.ts): whether the episode
+  // playing is a download, and whether it carried on from where they were.
+  const tracker = useListeningTracker();
+  const started = useRef({ downloaded: false, resuming: false });
 
   useEffect(() => {
     statusRef.current = status;
@@ -105,7 +110,20 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       interruptionMode: 'doNotMix',
     }).catch(() => {});
     api.progress().then(setProgress).catch(() => {});
+    sendWaiting();
   }, []);
+
+  useEffect(() => {
+    tracker.update({
+      episodeId: episode?.id ?? null,
+      mode: 'audio',
+      position: status.currentTime,
+      // Not while it's still getting to where it starts.
+      playing: status.playing && pendingSeek.current === null,
+      rate: status.playbackRate || 1,
+      ...started.current,
+    });
+  }, [tracker, episode, status]);
 
   const save = useCallback((ep: Episode, positionSec: number) => {
     const sec = Math.min(Math.max(0, Math.floor(positionSec)), ep.durationSec);
@@ -161,7 +179,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       pendingSeek.current = resumeAt >= ep.durationSec - 5 ? 0 : resumeAt;
       seekAttempts.current = 0;
       lastSaved.current = pendingSeek.current;
-      player.replace({ uri: localAudioUri(ep.id) ?? ep.audioUrl });
+      const local = localAudioUri(ep.id);
+      started.current = { downloaded: !!local, resuming: startSec === undefined && pendingSeek.current > 0 };
+      player.replace({ uri: local ?? ep.audioUrl });
       player.play();
       player.setActiveForLockScreen(
         true,

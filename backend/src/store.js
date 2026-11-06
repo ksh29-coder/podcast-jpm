@@ -4,6 +4,11 @@ const { parseVtt } = require('./vtt');
 const { cleanInsights, cleanSuggestions, cleanCaptionFix } = require('./ai');
 const { cuesToVtt } = require('./transcribe');
 const { inBackground } = require('./background');
+const fs = require('fs/promises');
+const os = require('os');
+const path = require('path');
+const plans = require('./edit-engine/plan');
+const episodeEdit = require('./episode-edit');
 
 // Database access and the JSON shapes the app sees. Media is either a static
 // file under /media (the seeded episodes) or a video on the video service.
@@ -54,7 +59,9 @@ const SHORT_SELECT = `
   left join episodes e on e.id = s.episode_id
   left join videos ev on ev.id = e.video_id`;
 
-function createStore({ db, video, ai, transcriber, editor, background = inBackground, tint = tintFromUrl, cleanUpEveryMs = 10 * 60_000 }) {
+// editWorker 'external': episode edits are made by a separate worker
+// (bin/edit-worker.js), not in the request's time limit (see background.js).
+function createStore({ db, video, ai, transcriber, editor, engine, background = inBackground, tint = tintFromUrl, cleanUpEveryMs = 10 * 60_000, editWorker = process.env.EDIT_WORKER }) {
   function episodeArtwork(row, baseUrl) {
     return row.playback_id ? video.thumbnailUrl(row.playback_id, row.thumbnail_sec) : absolutize(row.artwork_url, baseUrl);
   }
@@ -256,7 +263,7 @@ function createStore({ db, video, ai, transcriber, editor, background = inBackgr
     );
     // One slow or failing check shouldn't hide the rest.
     await Promise.all(rows.map((r) => syncVideo(r).catch((e) => console.warn('video sync', r.id, e.message))));
-    for (const r of rows) if (editBusy(r.edit_status)) background(advanceEdit(r.id));
+    for (const r of rows) if (editBusy(r.edit_status) && !(r.edit_plan && editWorker === 'external')) background(advanceEdit(r.id));
   }
 
   // ---- Pictures in a Short's video ----
@@ -285,11 +292,14 @@ function createStore({ db, video, ai, transcriber, editor, background = inBackgr
     const { rows } = await db.query(`select * from videos where id = $1 and ${claimable}`, [videoId]);
     const v = rows[0];
     if (!v) return;
-    if (!v.pictures.length) {
-      // All taken out again: back to the video without them.
+    const plan = v.edit_plan && episodeEdit.changesVideo(v.edit_plan);
+    if (!v.pictures.length && !plan) {
+      // All taken out again: back to the video without them (an episode's
+      // chapters and transcript back in the original's times).
+      if (v.edit_plan && v.unedited_asset_id) await retime(v, null);
       await db.query(
         `update videos set asset_id = unedited_asset_id, playback_id = unedited_playback_id, source_asset_id = asset_id,
-           status = 'processing', unedited_asset_id = null, unedited_playback_id = null
+           status = 'processing', audio_ready = false, unedited_asset_id = null, unedited_playback_id = null, edit_rendered = null
          where id = $1 and unedited_asset_id is not null`,
         [videoId]
       );
@@ -297,7 +307,7 @@ function createStore({ db, video, ai, transcriber, editor, background = inBackgr
       return;
     }
     const fail = (message) => db.query("update videos set edit_status = 'failed', edit_error = $2 where id = $1", [videoId, message]);
-    if (!editor) return fail('Adding pictures isn’t set up on this server');
+    if (plan ? !engine : !editor) return fail(plan ? 'Editing videos isn’t set up on this server' : 'Adding pictures isn’t set up on this server');
     // The video service may take a minute to make the file downloadable.
     let url = null;
     for (let i = 0; i < 12 && !url; i++) {
@@ -311,6 +321,10 @@ function createStore({ db, video, ai, transcriber, editor, background = inBackgr
     );
     const job = claimed[0];
     if (!job) return;
+    if (plan) return renderPlan(job, url).catch(async (e) => {
+      console.warn('episode edit', videoId, e.message);
+      await fail(e.expose ? e.message : 'The edit couldn’t be made. Try again.');
+    });
     try {
       const ids = job.pictures.map((p) => p.pictureId);
       const { rows: files } = await db.query("select id, data, mime, width, height from pictures where id = any($1) and status = 'ready'", [ids]);
@@ -334,6 +348,161 @@ function createStore({ db, video, ai, transcriber, editor, background = inBackgr
       console.warn('edit', videoId, e.message);
       await fail(e.expose ? e.message : 'The pictures couldn’t be added to the video. Try again.');
     }
+  }
+
+  // ---- Editing an episode's video (episode-edit.js) ----
+
+  // Makes the episode's video from its edit plan and the original upload
+  // (at url), sends it to the video service, and moves the episode's
+  // chapters, cover frame and transcript to the new video's times.
+  async function renderPlan(v, url) {
+    const plan = plans.withDefaults(v.edit_plan);
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'episode-edit-'));
+    // A long episode takes a while: say it's still going, so it isn't taken
+    // for one cut off and started again elsewhere.
+    const alive = setInterval(() => {
+      db.query("update videos set edit_started_at = now() where id = $1 and edit_status = 'rendering'", [v.id]).catch(() => {});
+    }, 60_000);
+    let uploadId;
+    try {
+      const out = path.join(dir, 'edit.mp4');
+      const started = Date.now();
+      // Each recording read once, from a file: the real sizes, then the edit.
+      const files = await engine.downloadAll({ [plans.MAIN]: url, ...(await sourceUrls(plan)) }, dir);
+      const info = await engine.probe(files[plans.MAIN]);
+      plan.source = { ...plan.source, ...info, durationSec: Math.max(info.durationSec, plan.source.durationSec || 0) };
+      for (const name of Object.keys(plan.sources)) {
+        const { width, height, durationSec } = await engine.probe(files[name]);
+        plan.sources[name] = { ...plan.sources[name], width, height, durationSec };
+      }
+      await engine.render(plan, { paths: files, out, quality: 'full' });
+      console.log('episode edit render', v.id, { seconds: (Date.now() - started) / 1000 });
+      const upload = await video.createUpload({ audio: v.wants_audio, captions: v.transcript_status !== 'ready' });
+      await video.uploadFile(upload.uploadUrl, out);
+      uploadId = upload.uploadId;
+    } finally {
+      clearInterval(alive);
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+    await retime(v, episodeEdit.segmentsOf(plan));
+    // The new video shows once it's processed. The original is kept to edit
+    // again; an earlier edit is deleted then (source_asset_id).
+    await db.query(
+      `update videos set upload_id = $2, asset_id = null, playback_id = null, status = 'processing', audio_ready = false,
+         unedited_asset_id = coalesce(unedited_asset_id, asset_id), unedited_playback_id = coalesce(unedited_playback_id, playback_id),
+         source_asset_id = case when unedited_asset_id is null then null else asset_id end,
+         edit_status = 'ready', edit_rendered = $3
+       where id = $1`,
+      [v.id, uploadId, JSON.stringify(plan)]
+    );
+  }
+
+  // A link to download a video's file; the video service may take a minute
+  // to make one.
+  async function fileUrl(assetId, what) {
+    for (let i = 0; i < 12; i++) {
+      const url = await video.downloadUrl(assetId);
+      if (url) return url;
+      await new Promise((r) => setTimeout(r, 5000));
+    }
+    throw httpError(409, `${what} isn’t ready to use yet. Try again in a minute.`);
+  }
+
+  // Links to the other recordings a plan shows (like a screen share), by name.
+  async function sourceUrls(plan) {
+    const out = {};
+    for (const [name, s] of Object.entries(plan.sources)) {
+      const id = String(s.video).replace(/^video:/, '');
+      const { rows } = await db.query('select asset_id from videos where id = $1', [id]);
+      if (!rows[0]?.asset_id) throw httpError(409, `The ${name} recording is missing. Add it again.`);
+      out[name] = await fileUrl(rows[0].asset_id, `The ${name} recording`);
+    }
+    return out;
+  }
+
+  // The video's transcript lines as stored: [{ startSec, endSec, text, speaker }].
+  const storedCues = async (videoId) =>
+    (await db.query('select start_sec, end_sec, text, speaker from transcript_cues where video_id = $1 order by idx', [videoId])).rows.map((c) => ({
+      startSec: c.start_sec,
+      endSec: c.end_sec,
+      text: c.text,
+      speaker: c.speaker,
+    }));
+
+  // The transcript in the original upload's times, by line.
+  async function originalLines(v) {
+    if (v.original_cues) return v.original_cues;
+    return episodeEdit.toOriginal(v.edit_segments, await storedCues(v.id), ['startSec', 'endSec']);
+  }
+
+  // Moves the episode's chapters, cover frame and transcript from the current
+  // video's times to those of the video made of the original's `segments`
+  // (null: the original itself).
+  async function retime(v, segments) {
+    const move = episodeEdit.retimer(v.edit_segments, segments);
+    const { rows } = await db.query('select id, chapters, thumbnail_sec from episodes where video_id = $1', [v.id]);
+    for (const ep of rows) {
+      const chapters = ep.chapters.map((c) => ({ ...c, startSec: move(c.startSec) })).filter((c) => c.startSec !== null);
+      await db.query('update episodes set chapters = $2, thumbnail_sec = $3, tint = null, updated_at = now() where id = $1', [ep.id, JSON.stringify(chapters), move(ep.thumbnail_sec) ?? 0]);
+    }
+    let original = v.original_cues;
+    if (v.transcript_status === 'ready') {
+      original = await originalLines(v);
+      const cues = episodeEdit.transcriptFor(segments, { words: v.transcript_words, lines: original });
+      await db.query('delete from transcript_cues where video_id = $1', [v.id]);
+      for (let i = 0; i < cues.length; i++) {
+        await db.query('insert into transcript_cues (video_id, idx, start_sec, end_sec, text, speaker) values ($1, $2, $3, $4, $5, $6)', [
+          v.id, i, cues[i].startSec, cues[i].endSec, cues[i].text, cues[i].speaker ?? null,
+        ]);
+      }
+    }
+    await db.query('update videos set edit_segments = $2, original_cues = $3 where id = $1', [
+      v.id,
+      segments ? JSON.stringify(segments) : null,
+      segments && original ? JSON.stringify(original) : null,
+    ]);
+  }
+
+  // The episode and its video, for editing; with why the video can't be
+  // edited now, if it can't.
+  async function editableEpisode(episodeId) {
+    const { rows } = await db.query('select e.id as episode_id, e.status as episode_status, e.published_at, e.speakers, e.video_id from episodes e where e.id = $1', [episodeId]);
+    const ep = rows[0];
+    if (!ep) throw httpError(404, 'Episode not found');
+    if (!ep.video_id) throw httpError(409, 'This episode has no uploaded video to edit');
+    await syncVideos([ep.video_id]);
+    const v = (await db.query('select * from videos where id = $1', [ep.video_id])).rows[0];
+    const live = ep.episode_status === 'published' && ep.published_at && new Date(ep.published_at) <= new Date();
+    const locked = live
+      ? 'This episode is live. Unpublish it to edit the video, so nobody finds it missing while the new version is made.'
+      : !v.unedited_asset_id && v.status !== 'ready'
+        ? 'The video is still processing. Try again in a few minutes.'
+        : null;
+    return { ep, v, locked };
+  }
+
+  // The edit plan to start from: the saved one, or an empty one on the original.
+  function planOf(v) {
+    if (v.edit_plan) return plans.withDefaults(v.edit_plan);
+    return plans.emptyPlan({ video: `video:${v.id}`, durationSec: v.duration_sec || 0, hasAudio: v.has_audio !== false });
+  }
+
+  // A plan's other recording (like a screen share): its video row.
+  async function sourceVideo(plan, name) {
+    const s = plan.sources[name];
+    if (!s) throw httpError(404, `This edit has no ${name} recording`);
+    const id = String(s.video).replace(/^video:/, '');
+    await syncVideos([id]);
+    const row = (await db.query('select * from videos where id = $1', [id])).rows[0];
+    if (!row) throw httpError(404, `The ${name} recording is missing. Add it again.`);
+    return row;
+  }
+
+  // Width and height for a "16:9"-style aspect ratio, until the real ones are
+  // read from the file when the edit is made.
+  function sizeOf(aspect) {
+    const [a, b] = String(aspect || '16:9').split(':').map(Number);
+    return { width: 1920, height: a > 0 && b > 0 ? Math.max(2, Math.round((1920 * b) / a / 2) * 2) : 1080 };
   }
 
   // Order-proof copy of a picture list, to tell whether it changed.
@@ -396,9 +565,9 @@ function createStore({ db, video, ai, transcriber, editor, background = inBackgr
       await db.query("update videos set transcript_status = 'transcribing', transcript_started_at = now() where id = $1", [v.id]);
       v.transcript_status = 'transcribing';
       try {
-        const { cues } = await transcriber.transcribe(video.audioUrl(v.playback_id));
+        const { cues, words } = await transcriber.transcribe(video.audioUrl(v.playback_id));
         if (!cues.length) return setStatus('unavailable');
-        await storeCues(cues, transcriber.model);
+        await storeCues(cues, transcriber.model, words);
         // Swap the video's captions for this transcript (Mux fetches it from us).
         if (baseUrl?.startsWith('https://')) {
           await video.replaceCaptions(v.asset_id, `${baseUrl}/api/captions/${v.id}.vtt`).catch((e) => console.warn('captions', v.id, e.message));
@@ -429,7 +598,7 @@ function createStore({ db, video, ai, transcriber, editor, background = inBackgr
     await storeCues(parseVtt(await video.fetchCaptions(v.playback_id, track.id)), 'mux');
     return setStatus('ready');
 
-    async function storeCues(cues, source) {
+    async function storeCues(cues, source, words = null) {
       await db.query('delete from transcript_cues where video_id = $1', [v.id]);
       for (let i = 0; i < cues.length; i++) {
         await db.query('insert into transcript_cues (video_id, idx, start_sec, end_sec, text, speaker) values ($1, $2, $3, $4, $5, $6)', [
@@ -441,8 +610,18 @@ function createStore({ db, video, ai, transcriber, editor, background = inBackgr
           cues[i].speaker ?? null,
         ]);
       }
-      await db.query('update videos set transcript_source = $2 where id = $1', [v.id, source]);
-      v.transcript_source = source;
+      // For the video editor: in the original upload's times when this video
+      // is an edit of it, and word by word when the service gives words.
+      const segments = v.edit_segments;
+      const original = segments ? episodeEdit.toOriginal(segments, cues, ['startSec', 'endSec']) : null;
+      const byWord = words?.length ? episodeEdit.toOriginal(segments, words, ['start', 'end']) : null;
+      await db.query('update videos set transcript_source = $2, original_cues = $3, transcript_words = $4 where id = $1', [
+        v.id,
+        source,
+        original && JSON.stringify(original),
+        byWord && JSON.stringify(byWord),
+      ]);
+      Object.assign(v, { transcript_source: source, original_cues: original, transcript_words: byWord });
     }
 
     async function setStatus(status) {
@@ -559,12 +738,20 @@ function createStore({ db, video, ai, transcriber, editor, background = inBackgr
 
   // An episode and everything hanging off it. Shorts cut from it stay, unlinked.
   async function removeEpisode(id) {
+    const { rows: plansOf } = await db.query('select v.edit_plan from episodes e join videos v on v.id = e.video_id where e.id = $1', [id]);
+    for (const s of Object.values(plansOf[0]?.edit_plan?.sources || {})) await removeVideo(String(s.video).replace(/^video:/, ''));
     const { rows } = await db.query('delete from episodes where id = $1 returning video_id', [id]);
     for (const table of ['likes', 'views', 'comments', 'content_reports']) await db.query(`delete from ${table} where item_type = 'episode' and item_id = $1`, [id]);
     if (rows[0]?.video_id) {
       const { rows: vids } = await db.query('delete from videos where id = $1 returning asset_id, source_asset_id, unedited_asset_id', [rows[0].video_id]);
       await deleteAssets(vids);
     }
+  }
+
+  // A video row and its files at the video service.
+  async function removeVideo(id) {
+    const { rows } = await db.query('delete from videos where id = $1 returning asset_id, source_asset_id, unedited_asset_id', [id]);
+    await deleteAssets(rows);
   }
 
   async function ownEpisode(userId, id) {
@@ -764,21 +951,6 @@ function createStore({ db, video, ai, transcriber, editor, background = inBackgr
       return rows.map((r) => toManagedShort(r, baseUrl));
     },
 
-    async reach(episodeId) {
-      const ep = await this.getEpisode(episodeId, '', { host: true });
-      if (!ep) return null;
-      const d = ep.durationSec || 0;
-      const { rows } = await db.query('select max_sec from progress where episode_id = $1', [episodeId]);
-      const listeners = rows.length;
-      // Share of listeners who got at least to the start of each tenth (0%, 10% … 90%), and to the end.
-      const points = Array.from({ length: 11 }, (_, i) => {
-        const at = (d * i) / 10;
-        const reached = rows.filter((r) => r.max_sec >= at - (i === 10 ? 5 : 0)).length;
-        return { percent: i * 10, atSec: Math.round(at), listeners: reached, share: listeners ? reached / listeners : 0 };
-      });
-      return { listeners, durationSec: d, points };
-    },
-
     // Host asks to (re)make the transcript with the speech-to-text service.
     async retranscribe(episodeId, baseUrl) {
       if (!transcriber) throw httpError(503, 'Transcription isn’t set up on this server');
@@ -802,8 +974,160 @@ function createStore({ db, video, ai, transcriber, editor, background = inBackgr
     // for the host to review. Needs the transcript, so it may ask the host to wait.
     generateInsights,
 
+    // What the website's video editor needs: the plan, the original upload to
+    // play (plan times are its times), its transcript in those times, and
+    // where making the edit has got to.
+    async episodeEdit(episodeId) {
+      const { ep, v, locked } = await editableEpisode(episodeId);
+      const plan = planOf(v);
+      const playback = v.unedited_playback_id || v.playback_id;
+      const lines = v.transcript_status === 'ready' ? await originalLines(v) : [];
+      const rendered = v.edit_rendered ? plans.withDefaults(v.edit_rendered) : null;
+      const same = (a, b) => ['cuts', 'texts', 'scenes', 'zooms'].every((k) => JSON.stringify(plans.included(a, { suggestions: false })[k]) === JSON.stringify(b ? plans.included(b, { suggestions: false })[k] : []));
+      return {
+        plan,
+        videoUrl: playback ? video.hlsUrl(playback) : null,
+        posterUrl: playback ? video.thumbnailUrl(playback, 0) : null,
+        durationSec: plan.source.durationSec,
+        locked,
+        edit: {
+          status: v.edit_plan || v.edit_rendered ? v.edit_status : 'none',
+          error: v.edit_error,
+          // Saved changes the current video doesn't have yet.
+          changed: !same(plan, rendered),
+          // The new video is made but still processing at the video service.
+          processing: v.edit_status === 'ready' && v.status !== 'ready',
+        },
+        transcript: {
+          status: v.transcript_status,
+          lines,
+          // Word by word ([text, start, end]) when the speech-to-text service made it.
+          words: v.transcript_words ? v.transcript_words.map((w) => [w.word, w.start, w.end]) : null,
+          speakers: ep.speakers || {},
+        },
+        pauses: v.pauses,
+        // Other recordings (like the screen share), to play beside the original.
+        sources: Object.fromEntries(
+          await Promise.all(
+            Object.entries(plan.sources).map(async ([name, s]) => {
+              const row = await sourceVideo(plan, name).catch(() => null);
+              return [name, { videoId: String(s.video).replace(/^video:/, ''), url: row?.playback_id ? video.hlsUrl(row.playback_id) : null, offsetSec: s.offsetSec, durationSec: s.durationSec }];
+            })
+          )
+        ),
+      };
+    },
+
+    // Adds (or replaces) another recording of the episode, like the screen
+    // share, once it's uploaded and processed. offsetSec: where it starts on
+    // the original's clock.
+    async setEditSource(episodeId, name, { videoId, offsetSec = 0 }) {
+      const { v, locked } = await editableEpisode(episodeId);
+      if (locked) throw httpError(409, locked);
+      if (videoId === v.id) throw httpError(400, 'That’s the episode’s own video');
+      await syncVideos([videoId]);
+      const row = (await db.query('select * from videos where id = $1', [videoId])).rows[0];
+      if (!row) throw httpError(404, 'Recording not found');
+      if (row.status === 'errored') throw httpError(409, `The recording couldn’t be processed: ${row.error || 'unknown error'}`);
+      if (row.status !== 'ready') throw httpError(409, 'The recording is still processing. Try again in a minute.');
+      const plan = planOf(v);
+      const old = plan.sources[name];
+      let next;
+      try {
+        next = plans.addSource(plan, name, { video: `video:${row.id}`, durationSec: row.duration_sec, ...sizeOf(row.aspect_ratio), offsetSec });
+      } catch (e) {
+        throw httpError(400, e.message);
+      }
+      const { errors } = plans.validate(next.plan);
+      if (errors.length) throw httpError(400, errors.join('\n'));
+      await db.query('update videos set edit_plan = $2 where id = $1', [v.id, JSON.stringify(next.plan)]);
+      if (old && old.video !== `video:${row.id}`) await removeVideo(String(old.video).replace(/^video:/, ''));
+      return { plan: next.plan };
+    },
+
+    // Takes a recording out of the edit, with the layouts and zooms using it.
+    async removeEditSource(episodeId, name) {
+      const { v, locked } = await editableEpisode(episodeId);
+      if (locked) throw httpError(409, locked);
+      const plan = planOf(v);
+      const s = plan.sources[name];
+      if (!s) throw httpError(404, `This edit has no ${name} recording`);
+      const { [name]: _, ...sources } = plan.sources;
+      const next = { ...plan, sources, scenes: plan.scenes.filter((x) => (x.source || 'screen') !== name || x.layout === plans.MAIN), zooms: plan.zooms.filter((z) => z.source !== name) };
+      await db.query('update videos set edit_plan = $2 where id = $1', [v.id, JSON.stringify(next)]);
+      await removeVideo(String(s.video).replace(/^video:/, ''));
+      return { plan: next };
+    },
+
+    // When a recording (the screen share) is blank, and when its picture
+    // changes a lot (a new slide or window), on the original's clock. Found once.
+    async editSourceActivity(episodeId, name) {
+      const { v } = await editableEpisode(episodeId);
+      const plan = planOf(v);
+      const row = await sourceVideo(plan, name);
+      const offset = plan.sources[name].offsetSec || 0;
+      let found = row.activity;
+      if (!found) {
+        if (!engine) throw httpError(503, 'Editing videos isn’t set up on this server');
+        if (!row.asset_id || row.status !== 'ready') throw httpError(409, 'The recording is still processing. Try again in a minute.');
+        found = await engine.activity(await fileUrl(row.asset_id, 'The recording'));
+        await db.query('update videos set activity = $2 where id = $1', [row.id, JSON.stringify(found)]);
+      }
+      const at = (t) => Math.round((t + offset) * 1000) / 1000;
+      return { blank: found.blank.map((b) => ({ from: at(b.from), to: at(b.to) })), changes: found.changes.map(at) };
+    },
+
+    // Saves the plan the website sent (see episode-edit.js); doesn't make it.
+    async saveEpisodeEdit(episodeId, input) {
+      const { v, locked } = await editableEpisode(episodeId);
+      if (locked) throw httpError(409, locked);
+      const { plan, warnings } = episodeEdit.fromWebsite(input, planOf(v));
+      await db.query('update videos set edit_plan = $2 where id = $1', [v.id, JSON.stringify(plan)]);
+      return { plan, warnings };
+    },
+
+    // Starts making the edited video from the saved plan.
+    async makeEpisodeEdit(episodeId) {
+      const { v, locked } = await editableEpisode(episodeId);
+      if (locked) throw httpError(409, locked);
+      if (editBusy(v.edit_status)) throw httpError(409, 'The edit is already being made');
+      if (v.edit_status === 'ready' && v.status !== 'ready') throw httpError(409, 'The last edit is still processing. Try again in a few minutes.');
+      if (!v.edit_plan || (!episodeEdit.changesVideo(v.edit_plan) && !v.unedited_asset_id)) throw httpError(400, 'There’s nothing to change yet');
+      await db.query("update videos set edit_status = 'queued', edit_error = null where id = $1", [v.id]);
+      if (editWorker !== 'external') background(advanceEdit(v.id));
+      return { status: 'queued' };
+    },
+
+    // Quiet stretches of the original upload, worth cutting: [{ from, to, durationSec }].
+    async episodePauses(episodeId) {
+      const { v } = await editableEpisode(episodeId);
+      if (v.pauses) return v.pauses;
+      if (v.has_audio === false) return [];
+      if (!engine) throw httpError(503, 'Editing videos isn’t set up on this server');
+      const playback = v.unedited_playback_id || v.playback_id;
+      if (!playback || !v.audio_ready) throw httpError(409, 'The audio is still being prepared. Try again in a minute.');
+      const pauses = await engine.silences(video.audioUrl(playback), { minSec: 1 });
+      await db.query('update videos set pauses = $2 where id = $1', [v.id, JSON.stringify(pauses)]);
+      return pauses;
+    },
+
+    // For the edit worker: makes every edit waiting to be made (or cut off
+    // part-way), one at a time. Returns how many it tried.
+    async makeQueuedEdits() {
+      const { rows } = await db.query(
+        `select id from videos where edit_status = 'queued' or (edit_status = 'rendering' and edit_started_at < now() - interval '6 minutes') order by created_at`
+      );
+      for (const r of rows) {
+        await syncVideos([r.id]).catch(() => {});
+        await advanceEdit(r.id).catch((e) => console.warn('edit worker', r.id, e.message));
+      }
+      return rows.length;
+    },
+
+    // kind 'screen': another recording for an episode's edit (like a screen
+    // share), which needs no audio file or captions of its own.
     async createUpload({ kind }) {
-      const { uploadId, uploadUrl } = await video.createUpload({ audio: kind === 'episode' });
+      const { uploadId, uploadUrl } = await video.createUpload(kind === 'screen' ? { audio: false, captions: false } : { audio: kind === 'episode' });
       const id = newId('vid');
       await db.query(
         `insert into videos (id, provider, upload_id, status, wants_audio) values ($1, $2, $3, 'uploading', $4)`,
@@ -1199,7 +1523,7 @@ function createStore({ db, video, ai, transcriber, editor, background = inBackgr
         if (v && table === 'shorts' && v.duration_sec > MAX_SHORT_SEC + 0.5) {
           throw httpError(400, `A Short can be at most ${MAX_SHORT_SEC} seconds`);
         }
-        if (v && editBusy(v.edit_status)) throw httpError(409, 'The pictures are still being added to the video. Try again in a minute.');
+        if (v && editBusy(v.edit_status)) throw httpError(409, table === 'episodes' ? 'The edited video is still being made. Try again once it’s ready.' : 'The pictures are still being added to the video. Try again in a minute.');
         // Approving it answers any reports.
         await db.query('delete from content_reports where item_type = $1 and item_id = $2', [table === 'episodes' ? 'episode' : 'short', id]);
         // A release time in the future schedules it; otherwise it goes live now.

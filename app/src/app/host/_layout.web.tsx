@@ -13,6 +13,7 @@ const SECTIONS: { path: string; label: string; icon: IconName }[] = [
   { path: '/host', label: 'Review', icon: 'checkCircle' },
   { path: '/host/episodes', label: 'Episodes', icon: 'film' },
   { path: '/host/shorts', label: 'Shorts', icon: 'shorts' },
+  { path: '/host/stats', label: 'Stats', icon: 'eye' },
 ];
 const UPLOADS: { path: string; label: string; icon: IconName }[] = [
   { path: '/host/upload-episode', label: 'Upload episode', icon: 'upload' },
@@ -23,6 +24,7 @@ const TITLES: [RegExp, string][] = [
   [/^\/host\/clip\//, 'Make a Short'],
   [/^\/host\/ai\//, 'AI assist'],
   [/^\/host\/episode\//, 'Edit episode'],
+  [/^\/host\/edit\//, 'Edit video'],
   [/^\/host\/short\//, 'Edit Short'],
   [/^\/host\/review\//, 'Review'],
 ];

@@ -11,6 +11,7 @@ import { formatDate, formatTime } from '../../../lib/format';
 import { usePlayer } from '../../../lib/player';
 import { useFetch } from '../../../lib/useFetch';
 import { colors, radius, spacing, type as text } from '../../../theme';
+import { noteSource } from '../../../lib/listening';
 
 const REASONS = ['Spam', 'Offensive', 'Off topic', 'Other'];
 
@@ -137,6 +138,7 @@ export default function CommentsScreen() {
   // Close the sheet and play from that moment; the mini player (or Now
   // Playing underneath) shows it. Video-only episodes open at that time instead.
   const jump = async (sec: number) => {
+    noteSource('comments');
     if (player.episode?.id === id) {
       player.playEpisode(player.episode, sec);
       return router.back();

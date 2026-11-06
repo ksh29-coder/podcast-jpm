@@ -282,6 +282,83 @@ create table if not exists pictures (
   height int,
   created_at timestamptz not null default now()
 );
+
+-- Editing an episode's video on the website (episode-edit.js): edit_plan is
+-- the wave-edit plan, in the times of the original upload (kept as
+-- unedited_asset_id); edit_status as for pictures. edit_segments are the
+-- parts of the original the current video is made of (null: all of it), to
+-- move times between versions. The original's transcript is kept too, by
+-- line (original_cues) and, from the speech-to-text service, by word
+-- (transcript_words), both in the original's times. pauses: quiet stretches
+-- of the original, found once.
+alter table videos add column if not exists edit_plan jsonb;
+alter table videos add column if not exists edit_segments jsonb;
+alter table videos add column if not exists original_cues jsonb;
+alter table videos add column if not exists transcript_words jsonb;
+alter table videos add column if not exists pauses jsonb;
+-- The plan the current video was made from, to tell whether there are changes to make.
+alter table videos add column if not exists edit_rendered jsonb;
+-- For a recording added to an edit (a screen share): when it's blank and when
+-- its picture changes a lot, found once.
+alter table videos add column if not exists activity jsonb;
+
+-- Listening stats (docs/listening-stats.md; stats.js). Hosts only ever see
+-- totals from these, never who.
+-- A listening session: one person playing one episode, sent by the app as it
+-- goes (id made by the app; each send replaces the last). ranges: the parts
+-- played, [[from, to], …] in the episode's time, in order, replays repeated;
+-- heard_sec is worked out from them. stop_sec: where it was when last sent.
+-- version: the episode's video when the session started.
+create table if not exists listen_sessions (
+  id text primary key,
+  user_id text not null,
+  episode_id text not null references episodes(id) on delete cascade,
+  version text,
+  started_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  ranges jsonb not null default '[]',
+  heard_sec double precision not null default 0,
+  stop_sec double precision not null default 0,
+  mode text not null check (mode in ('audio', 'video')),
+  platform text not null,
+  source text not null,
+  speed double precision not null default 1,
+  downloaded boolean not null default false
+);
+create index if not exists listen_sessions_episode on listen_sessions (episode_id);
+create index if not exists listen_sessions_started on listen_sessions (started_at);
+create index if not exists listen_sessions_user on listen_sessions (user_id);
+-- A Short shown in the feed: how long it was watched (loops included), how
+-- often it looped, whether it was swiped away in its first seconds, and
+-- whether "play full episode" was tapped.
+create table if not exists short_views (
+  id text primary key,
+  user_id text not null,
+  short_id text not null references shorts(id) on delete cascade,
+  shown_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  watched_sec double precision not null default 0,
+  loops int not null default 0,
+  opened_episode boolean not null default false,
+  platform text not null
+);
+create index if not exists short_views_short on short_views (short_id);
+create index if not exists short_views_shown on short_views (shown_at);
+-- What's left of sessions and Shorts views once old ones are deleted (after
+-- KEEP_MONTHS): their plays and time, so totals still add up.
+create table if not exists listen_totals (
+  item_type text not null check (item_type in ('episode', 'short')),
+  item_id text not null,
+  plays int not null default 0,
+  heard_sec double precision not null default 0,
+  primary key (item_type, item_id)
+);
+-- Worked-out stats, kept for a few minutes (stats.js).
+create table if not exists stats_cache (
+  key text primary key,
+  value jsonb not null,
+  computed_at timestamptz not null default now()
+);
 `;
 
 // Creates the tables if needed, and fills an empty database from

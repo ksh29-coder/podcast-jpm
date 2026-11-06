@@ -10,6 +10,8 @@ import { usePlayer } from '../../../lib/player';
 import { useFetch } from '../../../lib/useFetch';
 import { colors, radius, spacing, tintWash, type, withAlpha } from '../../../theme';
 import { hovered } from '../../../components/web/hover';
+import { openEpisode } from '../../../lib/openEpisode';
+import { noteSource } from '../../../lib/listening';
 
 // The website's home: the newest episode large, then every episode as a grid
 // and the latest Shorts in a row.
@@ -68,13 +70,16 @@ function Hero({ episode, positionSec }: { episode: Episode; positionSec: number 
   // Stacked in a phone-sized window.
   const narrow = useWindowDimensions().width < 700;
   const play = () => {
-    if (!hasAudio) return router.push(`/episode/${episode.id}?mode=video`);
+    if (!hasAudio) return openEpisode('home', `/episode/${episode.id}?mode=video`);
     if (playing) player.pause();
-    else player.playEpisode(episode);
+    else {
+      noteSource('home');
+      player.playEpisode(episode);
+    }
   };
   return (
     <View style={[styles.hero, narrow && styles.heroNarrow, { experimental_backgroundImage: tintWash(episode.tint) }]}>
-      <Pressable onPress={() => router.push(`/episode/${episode.id}`)} accessibilityRole="link" accessibilityLabel={`Open ${episode.title}`}>
+      <Pressable onPress={() => openEpisode('home', `/episode/${episode.id}`)} accessibilityRole="link" accessibilityLabel={`Open ${episode.title}`}>
         <View style={[styles.heroArtWrap, { boxShadow: `0 20px 50px ${glow}` }]}>
           <Image source={{ uri: episode.artworkUrl }} style={styles.heroArt} />
         </View>
@@ -83,7 +88,7 @@ function Hero({ episode, positionSec }: { episode: Episode; positionSec: number 
         <Text style={[type.eyebrow, { color: colors.highlight }]}>
           New episode · {formatDate(episode.publishedAt)} · {formatDuration(episode.durationSec)}
         </Text>
-        <Pressable onPress={() => router.push(`/episode/${episode.id}`)} accessibilityRole="link">
+        <Pressable onPress={() => openEpisode('home', `/episode/${episode.id}`)} accessibilityRole="link">
           <Text style={[type.display, !narrow && { fontSize: 40, lineHeight: 46 }]} numberOfLines={2}>
             {episode.title}
           </Text>
@@ -102,7 +107,7 @@ function Hero({ episode, positionSec }: { episode: Episode; positionSec: number 
             </Text>
           </Pressable>
           {hasAudio && (
-            <Pressable onPress={() => router.push(`/episode/${episode.id}?mode=video`)} style={(s) => [styles.secondary, hovered(s) && { backgroundColor: colors.border }]} accessibilityRole="button">
+            <Pressable onPress={() => openEpisode('home', `/episode/${episode.id}?mode=video`)} style={(s) => [styles.secondary, hovered(s) && { backgroundColor: colors.border }]} accessibilityRole="button">
               <Icon name="video" size={18} />
               <Text style={type.headline}>Watch</Text>
             </Pressable>
@@ -117,7 +122,7 @@ function EpisodeCard({ episode, width, positionSec }: { episode: Episode; width:
   const fraction = episode.durationSec > 0 ? Math.min(1, positionSec / episode.durationSec) : 0;
   return (
     <Pressable
-      onPress={() => router.push(`/episode/${episode.id}`)}
+      onPress={() => openEpisode('home', `/episode/${episode.id}`)}
       style={(s) => [{ width, gap: spacing.sm }, hovered(s) && { opacity: 0.85 }]}
       accessibilityRole="link"
       accessibilityLabel={episode.title}
