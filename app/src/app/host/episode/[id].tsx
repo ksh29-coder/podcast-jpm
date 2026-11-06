@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useHost } from '../../../components/host/HostGate';
 import { Schedule } from '../../../components/host/Schedule';
@@ -144,6 +144,11 @@ export default function EditEpisode() {
           <Pressable style={[ui.button, ui.secondary]} onPress={() => router.push(`/host/ai/${episode.id}`)}>
             <Text style={ui.secondaryText}>AI assist</Text>
           </Pressable>
+          {Platform.OS === 'web' && episode.video && (
+            <Pressable style={[ui.button, ui.secondary]} onPress={() => router.push(`/host/edit/${episode.id}`)}>
+              <Text style={ui.secondaryText}>Edit video</Text>
+            </Pressable>
+          )}
         </View>
       </Section>
 

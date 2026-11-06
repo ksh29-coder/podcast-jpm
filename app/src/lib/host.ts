@@ -75,6 +75,48 @@ export type HostShort = Clip &
     aiCheck: AiCheck;
   };
 
+// Editing an episode's video on the website: the edit plan (see the backend's
+// edit-engine/plan.js), in seconds of the original upload.
+export type EditItem = { id: string; from: number; to: number; reason?: string; by?: string; state?: 'suggested' };
+export type EditCut = EditItem;
+export type TextStyleName = 'lower-third' | 'title' | 'caption' | 'label';
+export type EditText = EditItem & { style: TextStyleName; text: string; subtitle?: string; x?: number; y?: number };
+export type Layout = 'speaker' | 'screen' | 'screen+speaker' | 'side-by-side';
+export type EditScene = EditItem & { layout: Layout; source?: string; pip?: 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left' };
+export type EditZoom = EditItem & { source: string; rect: [number, number, number, number] };
+export type EditSource = { video: string; durationSec: number; width?: number; height?: number; offsetSec: number };
+export type EditPlan = {
+  version: 1;
+  source: { video: string; durationSec: number; hasAudio?: boolean };
+  sources: Record<string, EditSource>;
+  cuts: EditCut[];
+  texts: EditText[];
+  scenes: EditScene[];
+  zooms: EditZoom[];
+  chapters: unknown[];
+};
+export type Pause = { from: number; to: number; durationSec: number };
+export type EpisodeEdit = {
+  plan: EditPlan;
+  // The original upload: the plan's times are its times.
+  videoUrl: string | null;
+  posterUrl: string | null;
+  durationSec: number;
+  // Why the video can't be edited now (say, it's live), or null.
+  locked: string | null;
+  // changed: saved changes the episode's video doesn't have yet;
+  // processing: the edited video is made and processing at the video service.
+  edit: { status: EditStatus; error: string | null; changed: boolean; processing: boolean };
+  transcript: {
+    status: string;
+    lines: { startSec: number; endSec: number; text: string; speaker: number | null }[];
+    // [text, start, end], when the speech-to-text service made the transcript.
+    words: [string, number, number][] | null;
+    speakers: Record<string, string>;
+  };
+  pauses: Pause[] | null;
+};
+
 export const MAX_SHORT_SEC = 90;
 
 // "#ai, testing  tools" -> ["ai", "testing", "tools"]. The server cleans up further.
@@ -146,6 +188,10 @@ export function hostApi(passcode: string) {
     shortCaptions: (id: string) => call<Captions>('GET', `/shorts/${id}/captions`),
     saveShortCaptions: (id: string, cues: Cue[]) => call<Captions>('PUT', `/shorts/${id}/captions`, { cues }),
     reach: (id: string) => call<Reach>('GET', `/episodes/${id}/reach`),
+    episodeEdit: (id: string) => call<EpisodeEdit>('GET', `/episodes/${id}/edit`),
+    saveEpisodeEdit: (id: string, plan: EditPlan) => call<{ plan: EditPlan; warnings: string[] }>('PUT', `/episodes/${id}/edit`, { plan }),
+    makeEpisodeEdit: (id: string) => call<{ status: EditStatus }>('POST', `/episodes/${id}/edit/make`),
+    episodePauses: (id: string) => call<Pause[]>('GET', `/episodes/${id}/edit/pauses`),
     comments: () => call<HostComment[]>('GET', '/comments'),
     setCommentStatus: (id: string, status: 'approved' | 'rejected') => call<void>('PATCH', `/comments/${id}`, { status }),
   };
@@ -165,7 +211,7 @@ export function videoLabel(v: VideoState | null, { needsAudio = false } = {}) {
   if (!v) return null;
   if (v.status === 'errored') return `Failed: ${v.error || 'processing error'}`;
   if (v.status === 'uploading') return 'Waiting for upload';
-  if (v.edit?.status === 'queued' || v.edit?.status === 'rendering') return 'Adding pictures…';
+  if (v.edit?.status === 'queued' || v.edit?.status === 'rendering') return needsAudio ? 'Making the edited video…' : 'Adding pictures…';
   if (v.status === 'processing') return 'Processing video…';
   if (needsAudio && !v.audioReady && v.hasAudio !== false) return 'Preparing audio…';
   return null;

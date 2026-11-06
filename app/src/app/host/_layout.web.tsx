@@ -23,6 +23,7 @@ const TITLES: [RegExp, string][] = [
   [/^\/host\/clip\//, 'Make a Short'],
   [/^\/host\/ai\//, 'AI assist'],
   [/^\/host\/episode\//, 'Edit episode'],
+  [/^\/host\/edit\//, 'Edit video'],
   [/^\/host\/short\//, 'Edit Short'],
   [/^\/host\/review\//, 'Review'],
 ];

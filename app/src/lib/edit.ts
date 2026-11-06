@@ -1,0 +1,107 @@
+import type { EditCut, EditItem, EditPlan, Pause, TextStyleName } from './host';
+
+// The video editor's sums, in the browser: what an edit plan keeps and where
+// things end up. They match the backend's edit-engine/plan.js, which makes
+// the real video.
+
+export type Range = { from: number; to: number };
+
+const round = (n: number) => Math.round(n * 1000) / 1000;
+
+export const newId = (prefix: string) => `${prefix}_${Math.random().toString(16).slice(2, 8).padEnd(6, '0')}`;
+
+// Leaves out suggestions nobody accepted (they don't go into the video).
+export const accepted = <T extends EditItem>(items: T[]) => items.filter((i) => i.state !== 'suggested');
+
+// The parts of the original that are kept, in order, with overlapping or
+// touching cuts joined up.
+export function keptSegments(cuts: EditCut[], durationSec: number): Range[] {
+  const sorted = accepted(cuts)
+    .map((c) => ({ from: Math.max(0, c.from), to: Math.min(durationSec, c.to) }))
+    .filter((c) => c.to > c.from)
+    .sort((a, b) => a.from - b.from);
+  const kept: Range[] = [];
+  let at = 0;
+  for (const c of sorted) {
+    if (c.from > at) kept.push({ from: at, to: c.from });
+    at = Math.max(at, c.to);
+  }
+  if (at < durationSec) kept.push({ from: at, to: durationSec });
+  return kept;
+}
+
+// Where original time t ends up in the edited video.
+export function toEdited(segments: Range[], t: number) {
+  let out = 0;
+  for (const s of segments) {
+    if (t < s.from) return round(out);
+    if (t <= s.to) return round(out + t - s.from);
+    out += s.to - s.from;
+  }
+  return round(out);
+}
+
+export const editedLength = (segments: Range[]) => round(segments.reduce((sum, s) => sum + s.to - s.from, 0));
+
+// Where playback should carry on from t: t itself, or the end of the cut it's in.
+export function playableFrom(segments: Range[], t: number) {
+  for (const s of segments) {
+    if (t < s.from) return s.from;
+    if (t < s.to) return t;
+  }
+  return null;
+}
+
+// How much of from–to is cut out: 'kept', 'cut' or 'partly'.
+export function cutState(segments: Range[], from: number, to: number) {
+  const kept = segments.reduce((sum, s) => sum + Math.max(0, Math.min(to, s.to) - Math.max(from, s.from)), 0);
+  if (kept >= to - from - 0.01) return 'kept';
+  return kept <= 0.01 ? 'cut' : 'partly';
+}
+
+// Sounds people make while thinking (the backend's FILLERS).
+const FILLERS = new Set(['um', 'umm', 'uh', 'uhh', 'er', 'erm', 'ah', 'hmm', 'mm', 'mhm']);
+const bare = (word: string) => word.toLowerCase().replace(/[^\p{L}']/gu, '');
+
+// Filler words still in the edit: [{ from, to, said }].
+export function findFillers(words: [string, number, number][], segments: Range[]) {
+  return words
+    .filter(([w, from, to]) => FILLERS.has(bare(w)) && cutState(segments, from, to) !== 'cut')
+    .map(([said, from, to]) => ({ from, to, said }));
+}
+
+// Cuts that shorten each pause of at least minSec to `keep` seconds, leaving
+// pauses already cut alone.
+export function shortenPauses(pauses: Pause[], segments: Range[], minSec: number, keep = 0.5) {
+  return pauses
+    .filter((p) => p.durationSec >= minSec && cutState(segments, p.from, p.to) === 'kept')
+    .map((p) => ({ from: round(p.from + keep / 2), to: round(p.to - keep / 2), durationSec: p.durationSec }));
+}
+
+// How each kind of text looks (the backend's TEXT_STYLES): x, y place its
+// anchor (as on a phone keypad: 1 bottom-left, 2 bottom-middle, 5 middle,
+// 7 top-left), size is a share of the picture's height.
+export const TEXT_STYLES: Record<TextStyleName, { label: string; x: number; y: number; align: 1 | 2 | 5 | 7; size: number; subtitleSize?: number }> = {
+  'lower-third': { label: 'Name tag', x: 0.05, y: 0.86, align: 1, size: 0.05, subtitleSize: 0.034 },
+  title: { label: 'Title card', x: 0.5, y: 0.5, align: 5, size: 0.09, subtitleSize: 0.045 },
+  caption: { label: 'Caption', x: 0.5, y: 0.92, align: 2, size: 0.045 },
+  label: { label: 'Corner label', x: 0.05, y: 0.06, align: 7, size: 0.04 },
+};
+
+// "12:03.4", for times that need tenths.
+export function clock(sec: number) {
+  const s = Math.max(0, sec);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const rest = (s % 60).toFixed(1).padStart(4, '0');
+  return h ? `${h}:${String(m).padStart(2, '0')}:${rest}` : `${m}:${rest}`;
+}
+
+export const sameRange = (a: Range | null, b: Range | null) => a?.from === b?.from && a?.to === b?.to;
+
+// A plan with an item swapped in (by id) or added.
+export function withItem<K extends 'cuts' | 'texts'>(plan: EditPlan, kind: K, item: EditPlan[K][number]): EditPlan {
+  const list = plan[kind] as EditItem[];
+  const at = list.findIndex((i) => i.id === item.id);
+  return { ...plan, [kind]: at === -1 ? [...list, item] : list.map((i) => (i.id === item.id ? item : i)) };
+}
