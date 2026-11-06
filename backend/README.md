@@ -31,6 +31,11 @@ npm test
 | POST | `/api/assistant/session` | A short-lived key for one voice conversation (OpenAI Realtime, `OPENAI_API_KEY`), within the daily limit |
 | POST | `/api/assistant/usage`, `/api/assistant/tools/:name` | How long it lasted; the assistant's tools (search, episode details, latest) |
 | * | `/api/host/*` | Host mode (passcode): uploads, publishing, the review queue for posted Shorts and comments |
+| GET/PUT | `/api/host/episodes/:id/edit` | The website's video editor: the episode's edit plan (cuts, texts, layouts, zooms) with the original upload, its transcript by word and what's been made; save the plan |
+| POST | `/api/host/episodes/:id/edit/make` | Make the edited video from the saved plan (see "Editing episodes" below) |
+| GET | `/api/host/episodes/:id/edit/pauses` | Quiet stretches of the original, worth cutting (found once) |
+| PUT/DELETE | `/api/host/episodes/:id/edit/sources/:name` | Add (`{ videoId, offsetSec }`, uploaded with `kind: "screen"`) or take out another recording, like the screen share |
+| GET | `/api/host/episodes/:id/edit/sources/:name/activity` | When that recording is blank and when its picture changes (found once) |
 | GET | `/media/*` | Media files, with HTTP Range support for seeking |
 
 Rejected Shorts and episodes, and uploads nobody posted, are deleted with their videos after 7 days.
@@ -104,7 +109,31 @@ npm run edit -- render ep.json --out final.mp4        # accepted changes only
   `src/edit-engine/ffmpeg.js` (probe, silences, activity, look, frame, render),
   `src/edit-engine/transcript.js` (transcripts, search, fillers) and `bin/wave-edit.js`.
 
-Long renders don't fit in a Vercel function; they're meant for a background worker.
+## Editing episodes (the website's video editor)
+
+The Host Studio's **Edit video** page saves the same edit plan as `wave-edit`, kept with the episode's
+video (`videos.edit_plan`, `src/episode-edit.js`), and **Make edited video** renders it with the same
+engine from the **original upload**, which is kept (`unedited_asset_id`): every edit starts from the
+original, so cut parts can come back, and an empty plan restores it. The new video goes to the video
+service like an upload; the episode's chapters, cover frame and transcript move to its times (the
+transcript is kept in the original's times, by word, for the editor). Episodes that are live can't
+have their video edited, so listeners never find it missing while the new one processes.
+
+The bundled ffmpeg can't look up host names, so the engine downloads links (the video service's
+files) and works on local files.
+
+**Long episodes.** Making an hour-long edit takes far longer than a Vercel function may run (and
+more disk than it has). Run the edit worker on any machine with the API's settings
+(`DATABASE_URL`, `MUX_*`), and set `EDIT_WORKER=external` on the API so it leaves episode edits to it:
+
+```sh
+npm run edit-worker            # keeps checking for edits to make
+npm run edit-worker -- --once  # makes what's waiting, then stops (for a scheduler)
+```
+
+A render in progress says so every minute, so it isn't started again elsewhere; one cut off (the
+worker stopped) is started again after six minutes. Without the worker, edits are made in the API's
+background, which suits short episodes and local use.
 
 ## Deploy to Vercel
 
@@ -118,3 +147,4 @@ Vercel's CDN, which supports Range requests.
   goes in `src/auth.js` (build step 6).
 - **Progress** is kept in memory and lost on restart; on Vercel it can reset between requests.
 - **Media on Vercel** is public CDN content; once auth exists it needs to move behind it.
+- **The edit worker isn't deployed anywhere yet**; until it is, long episode edits won't finish on Vercel.
