@@ -110,7 +110,7 @@ function NowPlaying({ episode, startAt, startInVideo }: { episode: Episode; star
           )}
 
           {mode === 'video' ? (
-            <EpisodeVideo key={videoStart.n} uri={episode.videoUrl} startAt={videoStart.sec} onTime={(s) => (videoTime.current = s)} style={styles.video} />
+            <EpisodeVideo key={videoStart.n} episodeId={episode.id} uri={episode.videoUrl} startAt={videoStart.sec} onTime={(s) => (videoTime.current = s)} style={styles.video} />
           ) : (
             <View style={[styles.artWrap, { width: artSize, height: artSize, boxShadow: `0 24px 60px ${glow}` }]}>
               <Image source={{ uri: episode.artworkUrl }} style={[styles.art, { width: artSize, height: artSize }]} />

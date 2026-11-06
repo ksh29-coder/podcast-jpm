@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useIsFocused, useLocalSearchParams } from 'expo-router';
 import { ErrorState } from '../../components/ErrorState';
 import { Icon, type IconName } from '../../components/Icon';
 import { Scrubber } from '../../components/Scrubber';
@@ -14,6 +14,7 @@ import { hovered } from '../../components/web/hover';
 import { api, type Short } from '../../lib/api';
 import { isBlocked, useBlocked } from '../../lib/blocked';
 import { usePlayer } from '../../lib/player';
+import { useShortView } from '../../lib/listening';
 import { useFetch } from '../../lib/useFetch';
 import { colors, radius, spacing, type } from '../../theme';
 
@@ -90,6 +91,8 @@ export default function ShortsWeb() {
 function ShortStage({ short, index, total, box, narrow }: { short: Short; index: number; total: number; box: { w: number; h: number }; narrow: boolean }) {
   const [paused, setPaused] = useState(false);
   const [time, setTime] = useState({ position: 0, duration: 0 });
+  // How long it's watched, for hosts' stats.
+  useShortView(short.id, useIsFocused(), time.position, time.duration);
   const video = useRef<ShortVideoHandle>(null);
   const actions = <Actions short={short} narrow={narrow} />;
   const h = narrow ? box.h : Math.max(420, box.h - spacing.xxxl * 2);

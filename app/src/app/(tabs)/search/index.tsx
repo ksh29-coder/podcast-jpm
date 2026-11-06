@@ -8,6 +8,7 @@ import { isBlocked, useBlocked } from '../../../lib/blocked';
 import { formatTime } from '../../../lib/format';
 import { usePlayer } from '../../../lib/player';
 import { colors, radius, spacing, type } from '../../../theme';
+import { openEpisode } from '../../../lib/openEpisode';
 
 // Search episodes, Shorts and what was said in them (transcripts), from the
 // iOS 26 search tab, or a search box at the top of the page on the website.
@@ -82,7 +83,7 @@ export default function SearchScreen() {
             {data.moments.map((m, i) => (
               <Pressable
                 key={`${m.episodeId}-${m.startSec}-${i}`}
-                onPress={() => router.push(`/episode/${m.episodeId}?t=${m.startSec}`)}
+                onPress={() => openEpisode('search', `/episode/${m.episodeId}?t=${m.startSec}`)}
                 style={({ pressed }) => [styles.moment, pressed && { backgroundColor: colors.card }]}
                 accessibilityRole="button"
                 accessibilityLabel={`Play ${m.episodeTitle} from ${formatTime(m.startSec)}: ${m.text}`}
@@ -102,7 +103,7 @@ export default function SearchScreen() {
           <View style={styles.section}>
             <Text style={[type.eyebrow, styles.sectionTitle]}>Episodes</Text>
             {data.episodes.map((ep) => (
-              <EpisodeRow key={ep.id} episode={ep} positionSec={progress[ep.id]?.positionSec} onPress={() => router.push(`/episode/${ep.id}`)} />
+              <EpisodeRow key={ep.id} episode={ep} positionSec={progress[ep.id]?.positionSec} onPress={() => openEpisode('search', `/episode/${ep.id}`)} />
             ))}
           </View>
         )}
@@ -118,7 +119,7 @@ export default function SearchScreen() {
                   web
                     ? router.push(`/shorts?id=${s.id}`)
                     : s.episodeId
-                      ? router.push(s.startSec != null ? `/episode/${s.episodeId}?t=${s.startSec}` : `/episode/${s.episodeId}`)
+                      ? openEpisode('search', s.startSec != null ? `/episode/${s.episodeId}?t=${s.startSec}` : `/episode/${s.episodeId}`)
                       : router.push('/shorts')
                 }
                 style={({ pressed }) => [styles.short, pressed && { backgroundColor: colors.card }]}

@@ -1,5 +1,4 @@
 import { ActivityIndicator, FlatList, Image, Pressable, RefreshControl, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
-import { router } from 'expo-router';
 import { EpisodeRow } from '../../../components/EpisodeRow';
 import { ErrorState } from '../../../components/ErrorState';
 import { Icon } from '../../../components/Icon';
@@ -9,6 +8,8 @@ import { formatDate, formatDuration } from '../../../lib/format';
 import { usePlayer } from '../../../lib/player';
 import { useFetch } from '../../../lib/useFetch';
 import { colors, radius, spacing, tintWash, type, withAlpha } from '../../../theme';
+import { openEpisode } from '../../../lib/openEpisode';
+import { noteSource } from '../../../lib/listening';
 
 export default function EpisodesScreen() {
   const { data: all, error, loading, reload } = useFetch(api.episodes);
@@ -43,7 +44,7 @@ export default function EpisodesScreen() {
           latest ? null : <Text style={[type.subhead, styles.empty]}>No episodes yet. New episodes appear here once a host publishes them.</Text>
         }
         renderItem={({ item }) => (
-          <EpisodeRow episode={item} positionSec={progress[item.id]?.positionSec} onPress={() => router.push(`/episode/${item.id}`)} />
+          <EpisodeRow episode={item} positionSec={progress[item.id]?.positionSec} onPress={() => openEpisode('home', `/episode/${item.id}`)} />
         )}
       />
     </View>
@@ -63,14 +64,17 @@ function Featured({ episode, positionSec }: { episode: Episode; positionSec: num
   const glow = withAlpha(episode.tint || colors.tintFallback, 0.9);
 
   const play = () => {
-    if (!hasAudio) return router.push(`/episode/${episode.id}`);
+    if (!hasAudio) return openEpisode('home', `/episode/${episode.id}`);
     if (playing) player.pause();
-    else player.playEpisode(episode);
+    else {
+      noteSource('home');
+      player.playEpisode(episode);
+    }
   };
 
   return (
     <View style={styles.featured}>
-      <Pressable onPress={() => router.push(`/episode/${episode.id}`)} accessibilityRole="button" accessibilityLabel={`Open ${episode.title}`}>
+      <Pressable onPress={() => openEpisode('home', `/episode/${episode.id}`)} accessibilityRole="button" accessibilityLabel={`Open ${episode.title}`}>
         <View style={[styles.featuredArt, { width: art, height: art, boxShadow: `0 18px 48px ${glow}` }]}>
           <Image source={{ uri: episode.artworkUrl }} style={[styles.featuredArt, { width: art, height: art }]} />
         </View>
@@ -102,7 +106,7 @@ function Featured({ episode, positionSec }: { episode: Episode; positionSec: num
         </Pressable>
         {hasAudio && (
           <Pressable
-            onPress={() => router.push(`/episode/${episode.id}?mode=video`)}
+            onPress={() => openEpisode('home', `/episode/${episode.id}?mode=video`)}
             style={({ pressed }) => [styles.secondary, pressed && { opacity: 0.7 }]}
             accessibilityRole="button"
             accessibilityLabel="Watch the video"

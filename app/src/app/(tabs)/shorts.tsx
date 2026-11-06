@@ -15,6 +15,7 @@ import { useLike } from '../../components/engage/useLike';
 import { api, type Short } from '../../lib/api';
 import { isBlocked, useBlocked } from '../../lib/blocked';
 import { usePlayer } from '../../lib/player';
+import { useShortView } from '../../lib/listening';
 import { colors, spacing, type } from '../../theme';
 import { useFetch } from '../../lib/useFetch';
 
@@ -111,6 +112,8 @@ function ShortItem({ short, height, active, index, total }: { short: Short; heig
   const [paused, setPaused] = useState(false);
   const video = useRef<ShortVideoHandle>(null);
   const [time, setTime] = useState({ position: 0, duration: 0 });
+  // How long it's watched, for hosts' stats.
+  useShortView(short.id, active, time.position, time.duration);
 
   // Scrolling away clears a pause, so it plays when you come back.
   const [wasActive, setWasActive] = useState(active);
