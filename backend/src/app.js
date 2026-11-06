@@ -16,6 +16,8 @@ const { muxVideo } = require('./video');
 const { createPush } = require('./push');
 const { ffmpegEditor } = require('./edit');
 const { ffmpegEngine } = require('./edit-engine/ffmpeg');
+const { createListening } = require('./listening');
+const { createStats } = require('./stats');
 
 const MEDIA_DIR = path.join(__dirname, '..', 'public', 'media');
 
@@ -29,6 +31,7 @@ function createApp({ db = connect(), video = muxVideo(), ai = openRouterAi(), tr
   const push = createPush({ db, ...(sendPush && { send: sendPush }) });
   const engagement = createEngagement({ db, push, later });
   const activity = createActivity({ db });
+  const stats = createStats({ db });
 
   // Tables are created (and seeded) on first use, so a fresh database needs no
   // separate setup step. Retried on the next request if it fails.
@@ -74,7 +77,7 @@ function createApp({ db = connect(), video = muxVideo(), ai = openRouterAi(), tr
   app.use('/media', express.static(mediaDir, { fallthrough: false }));
 
   app.use('/api', ensureDb);
-  app.use('/api/host', hostRouter({ store, engagement, push, later, baseUrl, passcode: hostPasscode, db }));
+  app.use('/api/host', hostRouter({ store, engagement, stats, push, later, baseUrl, passcode: hostPasscode, db }));
   app.use('/api/items', engagement.router());
   app.use('/api/me', meRouter({ store, engagement, activity, push, baseUrl }));
   app.use('/api/assistant', assistantRouter({ db, store, voice, baseUrl }));
@@ -182,6 +185,9 @@ function createApp({ db = connect(), video = muxVideo(), ai = openRouterAi(), tr
       res.json({ positionSec: rows[0].position_sec, updatedAt: new Date(rows[0].updated_at).toISOString() });
     })
   );
+
+  // Listening sessions and Shorts views, for hosts' stats (listening.js).
+  app.use('/api', createListening({ db }).router());
 
   app.use((err, req, res, next) => {
     if (err.expose) return res.status(err.status).json({ error: err.message });

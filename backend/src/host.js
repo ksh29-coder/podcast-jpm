@@ -106,7 +106,7 @@ function chapters(value) {
   }));
 }
 
-function hostRouter({ store, engagement, push, later, baseUrl, passcode, db }) {
+function hostRouter({ store, engagement, stats, push, later, baseUrl, passcode, db }) {
   const r = express.Router();
   r.use(requireHost(passcode, db));
   const by = () => 'host';
@@ -194,6 +194,17 @@ function hostRouter({ store, engagement, push, later, baseUrl, passcode, db }) {
       const reach = await store.reach(req.params.id);
       if (!reach) throw httpError(404, 'Episode not found');
       res.json(reach);
+    })
+  );
+
+  // Listening stats (stats.js): totals only, never who.
+  r.get('/stats', ah(async (req, res) => res.json(await stats.show())));
+  r.get(
+    '/episodes/:id/stats',
+    ah(async (req, res) => {
+      const found = await stats.episode(req.params.id);
+      if (!found) throw httpError(404, 'Episode not found');
+      res.json(found);
     })
   );
 
