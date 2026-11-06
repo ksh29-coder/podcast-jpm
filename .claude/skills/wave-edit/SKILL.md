@@ -1,6 +1,6 @@
 ---
 name: wave-edit
-description: Edit a podcast recording (cuts, on-screen text, chapters) with the backend's wave-edit command line, and check the result by looking at rendered frames. Use when asked to edit, tidy, trim, caption, title or chapter an episode recording.
+description: Edit a podcast recording (cuts by time or by what was said, filler words, on-screen text, chapters) with the backend's wave-edit command line, and check the result by looking at rendered frames. Use when asked to edit, tidy, trim, caption, title or chapter an episode recording.
 ---
 
 # Editing a recording with wave-edit
@@ -24,14 +24,23 @@ what to fix.
 ## Working through an edit
 
 1. `init ep.json --video <file>` (or reuse an existing plan), then `show`.
-2. Find candidates: `silences ep.json --min 1.5` for dead air. (Transcript and
-   filler-word commands are coming; until then, use a transcript if one is
-   given.)
-3. Make the changes: `cut`, `text` (styles `lower-third`, `title`, `caption`,
-   `label`), `chapter`.
-4. Check: run `validate`, and act on every error and warning. Then
+2. Get a transcript: `import-transcript ep.json --file <zoom .vtt>` if there is
+   one, else `transcribe ep.json`. Name speakers with `speaker`.
+3. Read it with `transcript` (in ranges for long episodes) and find
+   candidates:
+   - pre-show and after-show chatter ("can you hear me", "let me share my
+     screen", "is it recording") and setting-up while a screen share starts;
+   - retakes ("let me say that again"): keep the last take;
+   - dead air: `silences ep.json --min 1.5`;
+   - filler words: `fillers ep.json` (only `--apply` when the user wants all
+     of them gone; Zoom transcripts make these cuts rough).
+   Use `search` to find exact times, and `cut --text` for a phrase said once.
+4. Make the changes: `cut`, `text` (styles `lower-third`, `title`, `caption`,
+   `label`), `chapter`. Speaker names make good lower thirds the first time
+   each person speaks; topic changes make good chapters.
+5. Check: run `validate`, and act on every error and warning. Then
    `frame ep.json --at <s> --out /tmp/f.jpg` at each text and just after each
    cut, and **look at the frame**: is the text readable, inside the picture,
    not covering a face or what's being shown?
-5. When everything checks out, `render ep.json --out <file>.mp4` (`--low` for
+6. When everything checks out, `render ep.json --out <file>.mp4` (`--low` for
    a quick look), and report what you changed and why, cut by cut.

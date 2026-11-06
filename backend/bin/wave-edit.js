@@ -4,6 +4,8 @@ const path = require('path');
 const { parseArgs } = require('util');
 const plans = require('../src/edit-engine/plan');
 const { ffmpegEngine } = require('../src/edit-engine/ffmpeg');
+const transcripts = require('../src/edit-engine/transcript');
+const { openRouterTranscriber } = require('../src/transcribe');
 
 // wave-edit: edit a recording by changing its edit plan, then render it.
 // Made to be used by people and by AI agents alike: every command prints one
@@ -18,8 +20,21 @@ Set up and look:
   silences <plan> [--min 1] [--noise -35]
                                        Quiet stretches (seconds, dB) worth cutting
 
+Transcript:
+  import-transcript <plan> --file <zoom.vtt|words.json>
+                                       Use Zoom's transcript (or any WebVTT/words JSON)
+  transcribe <plan>                    Transcribe word by word (needs OPENROUTER_API_KEY)
+  speaker <plan> <id> --name <name>    Name a speaker
+  transcript <plan> [--from <s>] [--to <s>]
+                                       What was said, line by line, and what's cut
+  search <plan> --text <words>         Every place those words are said
+  fillers <plan> [--also "you know,i mean"] [--apply]
+                                       Um, uh… still in the edit; --apply cuts them all
+
 Change (add --dry-run to see the change without saving it):
   cut <plan> --from <s> --to <s> [--reason <why>]
+  cut <plan> --text <words> [--reason <why>]
+                                       Cut where those words are said (must be once)
   text <plan> --from <s> --to <s> --text <words> [--subtitle <words>]
        [--style lower-third|title|caption|label] [--x 0-1] [--y 0-1]
   chapter <plan> --at <s> --title <words>
@@ -51,6 +66,10 @@ const OPTIONS = {
   full: { type: 'boolean' },
   force: { type: 'boolean' },
   'dry-run': { type: 'boolean' },
+  file: { type: 'string' },
+  name: { type: 'string' },
+  also: { type: 'string' },
+  apply: { type: 'boolean' },
   help: { type: 'boolean', short: 'h' },
 };
 
@@ -75,6 +94,31 @@ async function save(file, plan) {
 
 // The source video's path (kept relative to the plan file) or URL.
 const sourcePath = (file, plan) => (isUrl(plan.source.video) ? plan.source.video : path.resolve(path.dirname(file), plan.source.video));
+
+// The plan's transcript, from its own file next to the plan.
+async function loadTranscript(file, plan) {
+  if (!plan.source.transcript) fail(`No transcript yet; add one with: wave-edit import-transcript ${file} --file <zoom.vtt>, or wave-edit transcribe ${file}`);
+  try {
+    return JSON.parse(await fs.readFile(path.resolve(path.dirname(file), plan.source.transcript), 'utf8'));
+  } catch (e) {
+    fail(`Couldn’t read the transcript ${plan.source.transcript}: ${e.message}`);
+  }
+}
+
+// Saves a transcript next to the plan, and points the plan at it.
+async function saveTranscript(file, plan, transcript) {
+  const name = `${path.basename(file).replace(/\.json$/i, '')}.transcript.json`;
+  await save(path.join(path.dirname(file), name), transcript);
+  await save(file, { ...plan, source: { ...plan.source, transcript: name } });
+  return {
+    saved: true,
+    transcript: name,
+    words: transcript.words.length,
+    speakers: transcript.speakers,
+    approx: transcript.approx,
+    ...(transcript.approx ? { note: 'Word times are spread over each line, so cuts on single words are rough' } : {}),
+  };
+}
 
 function summary(plan) {
   const tl = plans.timeline(plan);
@@ -129,8 +173,63 @@ async function main(argv) {
       const found = await engine.silences(sourcePath(file, plan), { minSec: o.min ? Number(o.min) : undefined, noiseDb: o.noise ? Number(o.noise) : undefined });
       return { silences: found, totalSec: Math.round(found.reduce((s, x) => s + x.durationSec, 0) * 1000) / 1000 };
     }
-    case 'cut':
-      return change((plan) => plans.addCut(plan, o));
+    case 'cut': {
+      if (o.text === undefined) return change((plan) => plans.addCut(plan, o));
+      // Cut where some words are said, when they're said just once.
+      const plan = await load(file);
+      const hits = transcripts.search(plan, await loadTranscript(file, plan), o.text).filter((h) => h.status !== 'cut');
+      if (hits.length !== 1) {
+        fail(hits.length ? `"${o.text}" is said ${hits.length} times; cut one with --from and --to:\n${hits.map((h) => `- ${h.from}–${h.to}: …${h.context}…`).join('\n')}` : `"${o.text}" isn’t said anywhere that’s still in the edit`);
+      }
+      return change((p) => plans.addCut(p, { from: hits[0].from, to: hits[0].to, reason: o.reason || `said: "${hits[0].said}"` }));
+    }
+    case 'import-transcript': {
+      if (!o.file) fail('Say which transcript: --file <zoom.vtt|words.json>');
+      const plan = await load(file);
+      const content = await fs.readFile(o.file, 'utf8').catch((e) => fail(`Couldn’t read ${o.file}: ${e.message}`));
+      return saveTranscript(file, plan, transcripts.parseTranscript(o.file, content));
+    }
+    case 'transcribe': {
+      const plan = await load(file);
+      const transcriber = openRouterTranscriber();
+      if (!transcriber) fail('Transcribing needs OPENROUTER_API_KEY set');
+      const { words, cost } = await transcriber.transcribeFile(sourcePath(file, plan));
+      const result = await saveTranscript(file, plan, transcripts.parseTranscript('words.json', JSON.stringify({ words })));
+      return { ...result, cost };
+    }
+    case 'speaker': {
+      if (rest[0] === undefined || !o.name) fail('Say who: wave-edit speaker <plan> <id> --name <name>');
+      const plan = await load(file);
+      const transcript = await loadTranscript(file, plan);
+      await save(path.resolve(path.dirname(file), plan.source.transcript), { ...transcript, speakers: { ...transcript.speakers, [rest[0]]: o.name } });
+      return { saved: true, speakers: { ...transcript.speakers, [rest[0]]: o.name } };
+    }
+    case 'transcript': {
+      const plan = await load(file);
+      const range = { from: o.from === undefined ? 0 : Number(o.from), to: o.to === undefined ? Infinity : Number(o.to) };
+      return { lines: transcripts.lines(plan, await loadTranscript(file, plan), range) };
+    }
+    case 'search': {
+      if (!o.text) fail('Say what to look for: --text <words>');
+      const plan = await load(file);
+      return { found: transcripts.search(plan, await loadTranscript(file, plan), o.text) };
+    }
+    case 'fillers': {
+      const plan = await load(file);
+      const transcript = await loadTranscript(file, plan);
+      const found = transcripts.fillers(plan, transcript, { also: o.also ? o.also.split(',').map((s) => s.trim()).filter(Boolean) : [] });
+      if (!o.apply) return { found, totalSec: Math.round(found.reduce((s, f) => s + f.to - f.from, 0) * 1000) / 1000 };
+      if (!found.length) return { saved: false, found };
+      return change((p) => {
+        let next = p;
+        const items = found.map((f) => {
+          const added = plans.addCut(next, { from: f.from, to: f.to, reason: `filler: "${f.said}"` });
+          next = added.plan;
+          return added.change.item;
+        });
+        return { plan: next, change: { op: 'add', kind: 'cut', items, ...(transcript.approx ? { note: 'Rough: this transcript times whole lines, not words' } : {}) } };
+      });
+    }
     case 'text':
       return change((plan) => plans.addText(plan, o));
     case 'chapter':

@@ -55,6 +55,14 @@ npm run edit -- show ep.json                         # the plan and the edited t
 npm run edit -- frame ep.json --at 96 --out check.jpg # one frame of the edit, texts included
 npm run edit -- render ep.json --out final.mp4        # --low for a quick small version
 npm run edit -- remove ep.json <id>                   # undo any cut, text or chapter
+
+# Editing by what was said
+npm run edit -- import-transcript ep.json --file zoom-transcript.vtt   # or: transcribe ep.json
+npm run edit -- speaker ep.json 0 --name "Alice Chen"
+npm run edit -- transcript ep.json --from 0 --to 300  # lines, speakers, and what's cut
+npm run edit -- search ep.json --text "kubernetes"
+npm run edit -- cut ep.json --text "can you see my screen"
+npm run edit -- fillers ep.json --apply               # cut every um/uh still in the edit
 ```
 
 - **Times are seconds of the original recording**, so a cut never moves anything else; `show`
@@ -64,8 +72,16 @@ npm run edit -- remove ep.json <id>                   # undo any cut, text or ch
 - Text styles: `lower-third`, `title`, `caption`, `label`, with optional `--x`/`--y` (0–1). Text is
   drawn by libass in Inter (in `assets/fonts`, SIL Open Font License), so it looks the same anywhere.
 - Chapters are written into the MP4, at their edited times.
-- Code: `src/edit-engine/plan.js` (the plan, its timeline and checks, no ffmpeg) and
-  `src/edit-engine/ffmpeg.js` (probe, silences, frame, render).
+- **Transcripts** are kept word by word in `<plan>.transcript.json` next to the plan. Zoom's
+  transcript (WebVTT, "Name: what they said") gives speakers by name but only times whole lines,
+  so its word times are shared out over each line and single-word cuts are rough; `transcribe`
+  (MAI-Transcribe through OpenRouter, `OPENROUTER_API_KEY`) times every word.
+- `cut --text` only cuts words said once in what's left of the edit; otherwise it lists each place
+  so you can pick one with `--from`/`--to`. `fillers` looks for um/uh/erm…; add phrases that are
+  often meant, like "you know", with `--also`.
+- Code: `src/edit-engine/plan.js` (the plan, its timeline and checks, no ffmpeg),
+  `src/edit-engine/ffmpeg.js` (probe, silences, frame, render) and
+  `src/edit-engine/transcript.js` (reading transcripts, search, fillers).
 
 Long renders don't fit in a Vercel function; they're meant for a background worker.
 
