@@ -215,6 +215,14 @@ function hostRouter({ store, engagement, push, later, baseUrl, passcode, db }) {
     })
   );
 
+  // Editing the episode's video on the website: the edit plan (cuts, texts,
+  // layouts, zooms; see episode-edit.js), saved as it's edited and made into
+  // the new video when the host asks.
+  r.get('/episodes/:id/edit', ah(async (req, res) => res.json(await store.episodeEdit(req.params.id))));
+  r.put('/episodes/:id/edit', ah(async (req, res) => res.json(await store.saveEpisodeEdit(req.params.id, req.body?.plan))));
+  r.post('/episodes/:id/edit/make', ah(async (req, res) => res.status(202).json(await store.makeEpisodeEdit(req.params.id))));
+  r.get('/episodes/:id/edit/pauses', ah(async (req, res) => res.json(await store.episodePauses(req.params.id))));
+
   r.get('/shorts', ah(async (req, res) => res.json(await engagement.withStats('short', await store.hostShorts(baseUrl(req)), 'host'))));
 
   // Comment review queue: reported comments, hidden until a host approves

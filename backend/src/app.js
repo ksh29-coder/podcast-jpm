@@ -15,15 +15,16 @@ const { createStore } = require('./store');
 const { muxVideo } = require('./video');
 const { createPush } = require('./push');
 const { ffmpegEditor } = require('./edit');
+const { ffmpegEngine } = require('./edit-engine/ffmpeg');
 
 const MEDIA_DIR = path.join(__dirname, '..', 'public', 'media');
 
 // Express 4 doesn't catch rejected promises from handlers.
 const ah = (fn) => (req, res, next) => fn(req, res, next).catch(next);
 
-function createApp({ db = connect(), video = muxVideo(), ai = openRouterAi(), transcriber = openRouterTranscriber(), voice = openAiVoice(), editor = ffmpegEditor(), background, tint, mediaDir = MEDIA_DIR, auth = authMiddleware(), hostPasscode, cleanUpEveryMs, sendPush } = {}) {
+function createApp({ db = connect(), video = muxVideo(), ai = openRouterAi(), transcriber = openRouterTranscriber(), voice = openAiVoice(), editor = ffmpegEditor(), engine = ffmpegEngine(), background, tint, mediaDir = MEDIA_DIR, auth = authMiddleware(), hostPasscode, cleanUpEveryMs, sendPush } = {}) {
   const app = express();
-  const store = createStore({ db, video, ai, transcriber, editor, ...(background && { background }), ...(tint && { tint }), ...(cleanUpEveryMs !== undefined && { cleanUpEveryMs }) });
+  const store = createStore({ db, video, ai, transcriber, editor, engine, ...(background && { background }), ...(tint && { tint }), ...(cleanUpEveryMs !== undefined && { cleanUpEveryMs }) });
   const later = background ?? inBackground;
   const push = createPush({ db, ...(sendPush && { send: sendPush }) });
   const engagement = createEngagement({ db, push, later });

@@ -114,6 +114,21 @@ function toOutputTime(segments, t) {
   return null;
 }
 
+// The other way: where edited time t came from in the main recording. Where
+// two kept parts join, t is the end of one and the start of the next: the
+// start (where something begins, like a chapter) unless `end` is set (where
+// something stops, like a line of the transcript).
+function toSourceTime(segments, t, { end = false } = {}) {
+  let out = 0;
+  for (let i = 0; i < segments.length; i++) {
+    const s = segments[i];
+    const len = s.to - s.from;
+    if (t < out + len || (t === out + len && (end || i === segments.length - 1))) return round(s.from + Math.max(0, t - out));
+    out += len;
+  }
+  return segments.length ? segments[segments.length - 1].to : 0;
+}
+
 // from–to in edited time, or null when it's all cut.
 function mapRange(segments, durationSec, from, to) {
   const a = toOutputTime(segments, from)?.time ?? durationSec;
@@ -365,6 +380,6 @@ function suggestions(plan) {
 
 module.exports = {
   VERSION, KINDS, TEXT_STYLES, LAYOUTS, PIP_CORNERS, MAIN, ZOOM_EASE_SEC, PlanError,
-  emptyPlan, withDefaults, included, keptSegments, toOutputTime, timeline, layoutSources, validate,
+  emptyPlan, withDefaults, included, keptSegments, toOutputTime, toSourceTime, timeline, layoutSources, validate,
   addCut, addText, addChapter, addScene, addZoom, addSource, removeItem, accept, reject, suggestions,
 };

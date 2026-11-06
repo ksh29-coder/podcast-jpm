@@ -13,7 +13,8 @@
     "test": "node --test",
     "start": "node --env-file-if-exists=.env.vercel.local --env-file-if-exists=.env.local src/server.js",
     "media": "./scripts/generate-sample-media.sh",
-    "edit": "node bin/wave-edit.js"
+    "edit": "node bin/wave-edit.js",
+    "edit-worker": "node --env-file-if-exists=.env.vercel.local --env-file-if-exists=.env.local bin/edit-worker.js"
   },
   "dependencies": {
     "@vercel/functions": "^3.1.4",
