@@ -207,12 +207,14 @@ function episodeFigures({ durationSec, publishedAt, sessions, shortViews, archiv
   out.retentionFromShorts = shortsAt.some((n) => n >= S.MIN_PEOPLE) ? shortsAt.map(share) : null;
 
   // Where people stopped: the last place each listener who didn't finish got
-  // to, in twentieths of the episode; the stretches with enough people.
+  // to, in twentieths of the episode; the stretches with enough people. One
+  // who got to the last twentieth (having skipped some) didn't stop early.
   const notDone = listeners.filter((p) => length(p.all) < S.COMPLETED_SHARE * durationSec);
   const buckets = new Array(20).fill(0);
   for (const p of notDone) {
     const last = p.sessions.reduce((a, b) => (new Date(b.started_at) > new Date(a.started_at) ? b : a));
-    buckets[Math.min(19, Math.floor((last.stop_sec / durationSec) * 20))] += 1;
+    const at = Math.floor((last.stop_sec / durationSec) * 20);
+    if (at < 19) buckets[at] += 1;
   }
   out.stopped = buckets
     .map((n, i) => ({ fromSec: Math.round((i / 20) * durationSec), toSec: Math.round(((i + 1) / 20) * durationSec), people: n, share: share(n) }))
@@ -237,7 +239,9 @@ function episodeFigures({ durationSec, publishedAt, sessions, shortViews, archiv
     drops.push(c);
   }
   out.moments = {
-    intro: { atSec: Math.round(introAt), share: share(listeners.filter((p) => covers(p.merged, introAt)).length) },
+    // Heard up to the end of the intro (a second before, so listening up to
+    // exactly then counts).
+    intro: { atSec: Math.round(introAt), share: share(listeners.filter((p) => covers(p.merged, introAt - 1)).length) },
     skipped: peaks(skipped, durationSec, enoughFor),
     replayed: peaks(replayed, durationSec, enoughFor),
     drops: drops.map(({ i }) => ({
@@ -424,7 +428,10 @@ function createStats({ db, settings = SETTINGS, now = () => new Date() }) {
         const archivedBy = new Map(archived.map((a) => [a.item_id, a]));
         const totals = (await db.query("select coalesce(sum(plays), 0)::int as plays, coalesce(sum(heard_sec), 0) as heard from listen_totals where item_type = 'episode'")).rows[0];
         const { rows: all } = await db.query(
-          `select count(distinct user_id)::int as listeners, count(*) filter (where heard_sec >= $1)::int as plays, coalesce(sum(heard_sec), 0) as heard from listen_sessions`,
+          `select (select count(*)::int from (select user_id from listen_sessions where heard_sec >= $1
+                     union select user_id from short_views where watched_sec >= $1) people) as listeners,
+                  count(*) filter (where heard_sec >= $1)::int as plays, coalesce(sum(heard_sec), 0) as heard
+           from listen_sessions`,
           [S.PLAY_SEC]
         );
         const shortTime = (await db.query('select coalesce(sum(watched_sec), 0) as t from short_views')).rows[0].t;

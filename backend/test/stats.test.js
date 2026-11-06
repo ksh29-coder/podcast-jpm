@@ -226,3 +226,22 @@ test('after the keeping time, sessions go but their plays and time stay in the t
   const kept = (await db.query("select plays, heard_sec from listen_totals where item_type = 'episode' and item_id = 'ep001'")).rows[0];
   assert.deepStrictEqual([kept.plays, kept.heard_sec], [before.plays, Number(before.heard)]);
 });
+
+test('getting to the end after skipping isn’t stopping, and listening up to the intro’s end counts', () => {
+  const skippers = [1, 2, 3, 4, 5].map((n) => row(n, [[0, 60], [100, 600]]));
+  const quitters = [6, 7, 8, 9, 10].map((n) => row(n, [[0, 30]]));
+  const f = figures([...skippers, ...quitters], []);
+  assert.deepStrictEqual(f.stopped.map((s) => [s.fromSec, s.people]), [[30, 5]], 'only the ones who left at 30 s');
+  assert.strictEqual(f.moments.intro.share, 0.5, 'the skippers heard up to exactly 60 s');
+});
+
+test('total listeners are people with a play (or 30 seconds through a Short), not everyone who pressed play', async () => {
+  const stats = createStats({ db, settings: { ...SETTINGS, REFRESH_MIN: 0 } });
+  // Enough people for a total to show.
+  for (let n = 50; n < 55; n++) await listen(n, session(n), { ranges: [[0, 60]], stopSec: 60 });
+  const before = (await stats.show()).totals;
+  await listen(40, session(40), { ranges: [[0, 5]], stopSec: 5 });
+  await send(41, '/short-views/view-000041', { shortId: 'ep001-c1', watchedSec: 30, platform: 'web' });
+  const after = (await stats.show()).totals;
+  assert.strictEqual(after.listeners - before.listeners, 1, 'the Short watcher, not the 5-second one');
+});

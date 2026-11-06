@@ -36,6 +36,9 @@ npm test
 | GET | `/api/host/episodes/:id/edit/pauses` | Quiet stretches of the original, worth cutting (found once) |
 | PUT/DELETE | `/api/host/episodes/:id/edit/sources/:name` | Add (`{ videoId, offsetSec }`, uploaded with `kind: "screen"`) or take out another recording, like the screen share |
 | GET | `/api/host/episodes/:id/edit/sources/:name/activity` | When that recording is blank and when its picture changes (found once) |
+| PUT | `/api/listening/:id` | A listening session so far (`{ episodeId, ranges, stopSec, mode, platform, source, speed, downloaded, startedAt }`); each send replaces the last. Live episodes only |
+| PUT | `/api/short-views/:id` | A Short shown in the feed so far (`{ shortId, watchedSec, loops, openedEpisode, platform }`) |
+| GET | `/api/host/stats`, `/api/host/episodes/:id/stats` | Listening stats (`src/stats.js`, definitions in `src/stats-settings.js`): totals only, nothing for fewer than 5 people, refreshed every 15 minutes |
 | GET | `/media/*` | Media files, with HTTP Range support for seeking |
 
 Rejected Shorts and episodes, and uploads nobody posted, are deleted with their videos after 7 days.

@@ -13,6 +13,7 @@ const SECTIONS: { path: string; label: string; icon: IconName }[] = [
   { path: '/host', label: 'Review', icon: 'checkCircle' },
   { path: '/host/episodes', label: 'Episodes', icon: 'film' },
   { path: '/host/shorts', label: 'Shorts', icon: 'shorts' },
+  { path: '/host/stats', label: 'Stats', icon: 'eye' },
 ];
 const UPLOADS: { path: string; label: string; icon: IconName }[] = [
   { path: '/host/upload-episode', label: 'Upload episode', icon: 'upload' },

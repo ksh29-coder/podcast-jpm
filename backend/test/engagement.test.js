@@ -108,21 +108,13 @@ test('host lists include engagement counts', async () => {
   assert.strictEqual(typeof ep.comments, 'number');
 });
 
-test('listening progress is kept per device, and hosts see how far people got', async () => {
+test('listening progress is kept per device', async () => {
   await alice('PUT', '/api/progress/ep001', { positionSec: 30 });
   await alice('PUT', '/api/progress/ep001', { positionSec: 20 }); // rewound: position moves, furthest stays 30
   await bob('PUT', '/api/progress/ep001', { positionSec: 175 });
   assert.strictEqual((await alice('GET', '/api/progress')).body.ep001.positionSec, 20);
   assert.strictEqual((await bob('GET', '/api/progress')).body.ep001.positionSec, 175);
 
-  const reach = (await host('GET', '/episodes/ep001/reach')).body;
-  assert.strictEqual(reach.listeners, 2);
-  const at = (pct) => reach.points.find((p) => p.percent === pct);
-  assert.strictEqual(at(0).share, 1);
-  assert.strictEqual(at(10).listeners, 2, 'both got past 18 s'); // 10% of 180 s
-  assert.strictEqual(at(20).listeners, 1, 'only bob got to 36 s');
-  assert.strictEqual(at(100).listeners, 1, 'bob finished (within 5 s of the end)');
-  assert.strictEqual((await host('GET', '/episodes/nope/reach')).status, 404);
 });
 
 test('comments can be pinned to a moment, reported (hidden for review), and carry a blockable author key', async () => {

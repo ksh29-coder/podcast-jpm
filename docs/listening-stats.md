@@ -4,6 +4,11 @@ What AI Wave records about listening and watching, and what hosts see. Based on 
 Apple Podcasts, YouTube and Microsoft Stream measure (research, November 2026), and decisions
 made with the product owner.
 
+**Built** (November 2026): recording in the app (`app/src/lib/listening.ts`), the API and
+figures (`backend/src/listening.js`, `backend/src/stats.js`, definitions in
+`backend/src/stats-settings.js`), the episode's Listening stats in the Host Studio, the Stats
+page, and the privacy page. Still to do: checking the rules with compliance and privacy.
+
 ## Decisions
 
 | Question | Decision |
@@ -15,13 +20,14 @@ made with the product owner.
 | A listening history for listeners | **Later.** |
 | Exports (CSV, other systems) | **No.** |
 
-## What exists today
+## What existed before
 
 - `progress`: per person and episode, the last position (resume on another device) and the furthest point.
 - `views`, `likes`, comments: one view per person, whatever they watched.
 - "How far people got" on the host's episode page, from the furthest points.
 
-These stay. Resume keeps working as it does.
+Resume, views, likes and comments stay. "How far people got" is replaced by the new stats (it
+also showed figures for fewer than 5 people).
 
 ## 1. What the app records
 

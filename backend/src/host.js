@@ -186,17 +186,6 @@ function hostRouter({ store, engagement, stats, push, later, baseUrl, passcode, 
     })
   );
 
-  // How far people got: of everyone who started the episode, the share who
-  // reached each tenth of it.
-  r.get(
-    '/episodes/:id/reach',
-    ah(async (req, res) => {
-      const reach = await store.reach(req.params.id);
-      if (!reach) throw httpError(404, 'Episode not found');
-      res.json(reach);
-    })
-  );
-
   // Listening stats (stats.js): totals only, never who.
   r.get('/stats', ah(async (req, res) => res.json(await stats.show())));
   r.get(

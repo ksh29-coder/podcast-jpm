@@ -951,21 +951,6 @@ function createStore({ db, video, ai, transcriber, editor, engine, background = 
       return rows.map((r) => toManagedShort(r, baseUrl));
     },
 
-    async reach(episodeId) {
-      const ep = await this.getEpisode(episodeId, '', { host: true });
-      if (!ep) return null;
-      const d = ep.durationSec || 0;
-      const { rows } = await db.query('select max_sec from progress where episode_id = $1', [episodeId]);
-      const listeners = rows.length;
-      // Share of listeners who got at least to the start of each tenth (0%, 10% … 90%), and to the end.
-      const points = Array.from({ length: 11 }, (_, i) => {
-        const at = (d * i) / 10;
-        const reached = rows.filter((r) => r.max_sec >= at - (i === 10 ? 5 : 0)).length;
-        return { percent: i * 10, atSec: Math.round(at), listeners: reached, share: listeners ? reached / listeners : 0 };
-      });
-      return { listeners, durationSec: d, points };
-    },
-
     // Host asks to (re)make the transcript with the speech-to-text service.
     async retranscribe(episodeId, baseUrl) {
       if (!transcriber) throw httpError(503, 'Transcription isn’t set up on this server');

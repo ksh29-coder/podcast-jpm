@@ -41,8 +41,6 @@ export type VideoState = {
 // publishedAt is in the future while a release is scheduled.
 type HostFields = { status: Status; video: VideoState | null; createdAt: string; publishedAt: string | null };
 
-// Of everyone who started an episode, how many reached each tenth of it.
-export type Reach = { listeners: number; durationSec: number; points: { percent: number; atSec: number; listeners: number; share: number }[] };
 // The AI's check of what's said in something posted from the app or website.
 export type AiCheck = { status: 'none' | 'generating' | 'ready' | 'unavailable'; concerns: string[] } | null;
 
@@ -120,6 +118,66 @@ export type EpisodeEdit = {
 };
 export type Activity = { blank: { from: number; to: number }[]; changes: number[] };
 
+// Listening stats (the backend's stats.js): totals only, and null wherever a
+// figure would be based on fewer than 5 people.
+export type StatsDefinitions = {
+  PLAY_SEC: number;
+  ENGAGED_SHARE: number;
+  ENGAGED_SEC: number;
+  COMPLETED_SHARE: number;
+  SWIPED_SEC: number;
+  FIRST_DAYS: number;
+  MIN_PEOPLE: number;
+  REFRESH_MIN: number;
+};
+export type Headline =
+  | { enough: false; complete?: boolean }
+  | {
+      enough: true;
+      plays: number;
+      listeners: number;
+      engaged: number | null;
+      completed: number | null;
+      completionRate: number;
+      timeListenedSec: number;
+      avgConsumption: number | null;
+      fromShorts: { listeners: number | null; onlyShorts: number | null; timeSec: number };
+      // First days only: whether they're over.
+      complete?: boolean;
+    };
+export type Span = { fromSec: number; toSec: number };
+export type SplitRow = { key: string; listeners: number | null; timeSec?: number };
+export type EpisodeStats = {
+  durationSec: number;
+  refreshedAt: string;
+  all: Headline;
+  firstDays: Headline | null;
+  // Share of listeners who heard each of 100 points across the episode.
+  retention?: number[];
+  retentionFromShorts?: number[] | null;
+  stopped?: (Span & { people: number; share: number })[];
+  moments?: {
+    intro: { atSec: number; share: number };
+    skipped: (Span & { people: number })[];
+    replayed: (Span & { people: number })[];
+    drops: (Span & { fromShare: number; toShare: number })[];
+  };
+  splits?: { mode: SplitRow[]; platform: SplitRow[]; source: SplitRow[]; audience: SplitRow[] };
+  definitions: StatsDefinitions;
+};
+export type ShortStats = { id: string; title: string; episodeId: string | null; lengthSec: number } & (
+  | { enough: false }
+  | { enough: true; views: number; viewers: number; viewedShare: number; swipedShare: number; avgWatchedShare: number | null; loops: number; openedEpisode: number }
+);
+export type ShowStats = {
+  refreshedAt: string;
+  totals: { listeners: number; plays: number; timeListenedSec: number } | null;
+  weeks: { week: string; listeners: number | null; plays: number | null; timeSec: number | null }[];
+  episodes: { id: string; title: string; publishedAt: string | null; durationSec: number; all: Headline; firstDays: Headline | null }[];
+  shorts: ShortStats[];
+  definitions: StatsDefinitions;
+};
+
 export const MAX_SHORT_SEC = 90;
 
 // "#ai, testing  tools" -> ["ai", "testing", "tools"]. The server cleans up further.
@@ -190,7 +248,8 @@ export function hostApi(passcode: string) {
       call<HostShort>('PATCH', `/shorts/${id}`, body),
     shortCaptions: (id: string) => call<Captions>('GET', `/shorts/${id}/captions`),
     saveShortCaptions: (id: string, cues: Cue[]) => call<Captions>('PUT', `/shorts/${id}/captions`, { cues }),
-    reach: (id: string) => call<Reach>('GET', `/episodes/${id}/reach`),
+    episodeStats: (id: string) => call<EpisodeStats>('GET', `/episodes/${id}/stats`),
+    stats: () => call<ShowStats>('GET', '/stats'),
     episodeEdit: (id: string) => call<EpisodeEdit>('GET', `/episodes/${id}/edit`),
     saveEpisodeEdit: (id: string, plan: EditPlan) => call<{ plan: EditPlan; warnings: string[] }>('PUT', `/episodes/${id}/edit`, { plan }),
     makeEpisodeEdit: (id: string) => call<{ status: EditStatus }>('POST', `/episodes/${id}/edit/make`),
