@@ -24,8 +24,11 @@ what to fix.
 ## Working through an edit
 
 1. `init ep.json --video <file>` (or reuse an existing plan), then `show`.
-2. Get a transcript: `import-transcript ep.json --file <zoom .vtt>` if there is
-   one, else `transcribe ep.json`. Name speakers with `speaker`.
+2. Get a transcript with `transcribe ep.json` (unless the plan already has
+   one; it costs money). Work out who each speaker is from what they say
+   (introductions, names used) and name them with `speaker <plan> <id>`. In
+   recordings over 40 minutes speaker ids are per 40-minute piece ("1:0"), so
+   the same person has an id in each piece; name every one.
 3. Read it with `transcript` (in ranges for long episodes) and find
    candidates:
    - pre-show and after-show chatter ("can you hear me", "let me share my
@@ -33,7 +36,7 @@ what to fix.
    - retakes ("let me say that again"): keep the last take;
    - dead air: `silences ep.json --min 1.5`;
    - filler words: `fillers ep.json` (only `--apply` when the user wants all
-     of them gone; Zoom transcripts make these cuts rough).
+     of them gone).
    Use `search` to find exact times, and `cut --text` for a phrase said once.
 4. Make the changes: `cut`, `text` (styles `lower-third`, `title`, `caption`,
    `label`), `chapter`. Speaker names make good lower thirds the first time

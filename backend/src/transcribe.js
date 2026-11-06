@@ -118,4 +118,4 @@ function cuesToVtt(cues) {
   return `WEBVTT\n\n${cues.map((c) => `${stamp(c.startSec)} --> ${stamp(c.endSec)}\n${c.text}`).join('\n\n')}\n`;
 }
 
-module.exports = { openRouterTranscriber, wordsToCues, cuesToVtt };
+module.exports = { openRouterTranscriber, wordsToCues, cuesToVtt, PIECE_SEC };

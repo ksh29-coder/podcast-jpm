@@ -1,73 +1,52 @@
-const { parseVtt } = require('../vtt');
-const { wordsToCues } = require('../transcribe');
+const { wordsToCues, PIECE_SEC } = require('../transcribe');
 const { keptSegments } = require('./plan');
 
-// An edit plan's transcript: what was said, word by word, in source time.
-// Kept in its own file next to the plan (plan.source.transcript) because a
-// long episode has thousands of words.
+// An edit plan's transcript: what was said, word by word, in source time,
+// from the AI transcriber. Kept in its own file next to the plan
+// (plan.source.transcript) because a long episode has thousands of words.
 //
-// { words: [{ text, start, end, speaker }], speakers: { [id]: name }, approx }
+// { words: [{ text, start, end, speaker }], speakers: { [speaker]: name } }
 //
-// approx is true when word times were spread evenly over each line (Zoom's
-// transcript only times whole lines), so cuts on single words are rough.
+// The transcriber works on pieces of PIECE_SEC (40 minutes) and numbers the
+// speakers of each piece on its own, so in a longer recording speaker 0 of
+// one piece needn't be speaker 0 of the next. There, speakers are "piece:n"
+// (like "1:0") so they're never mixed up, and each gets named once.
 
 class TranscriptError extends Error {}
 
-const round = (n) => Math.round(n * 1000) / 1000;
+const SPEAKER = /^\d+:\d+$/;
+const speakerOf = (v) => (Number.isInteger(v) || SPEAKER.test(v) ? v : null);
 
-// Lines -> words, sharing out each line's time by the words' lengths.
-function linesToWords(lines) {
-  const words = [];
-  for (const line of lines) {
-    const parts = line.text.split(/\s+/).filter(Boolean);
-    const total = parts.reduce((n, p) => n + p.length + 1, 0);
-    let at = line.startSec;
-    for (const p of parts) {
-      const len = ((line.endSec - line.startSec) * (p.length + 1)) / total;
-      words.push({ text: p, start: round(at), end: round(at + len), speaker: line.speaker });
-      at += len;
-    }
-  }
-  return words;
+// Transcriber words ({ word, start, end, speaker }) as a transcript of a
+// recording durationSec long.
+function fromWords(words, { durationSec, pieceSec = PIECE_SEC } = {}) {
+  const pieces = durationSec > pieceSec;
+  return {
+    words: words
+      .map((w) => ({
+        text: String(w.word ?? w.text ?? '').trim(),
+        start: Number(w.start),
+        end: Number(w.end),
+        speaker: Number.isInteger(w.speaker) && pieces ? `${Math.floor(w.start / pieceSec)}:${w.speaker}` : speakerOf(w.speaker),
+      }))
+      .filter((w) => w.text && Number.isFinite(w.start) && Number.isFinite(w.end))
+      .sort((a, b) => a.start - b.start),
+    speakers: {},
+  };
 }
 
-// Zoom writes each line as "Name: what they said". Only read names that way
-// when most lines have one, so a line like "Note: …" isn't taken for a name.
-function splitSpeakers(cues) {
-  const named = cues.map((c) => /^([^:]{1,60}):\s+(.+)$/.exec(c.text));
-  if (named.filter(Boolean).length < cues.length * 0.6) return { lines: cues.map((c) => ({ ...c, speaker: null })), speakers: {} };
-  const ids = new Map();
-  const lines = cues.map((c, i) => {
-    const m = named[i];
-    if (!m) return { ...c, speaker: null };
-    if (!ids.has(m[1])) ids.set(m[1], ids.size);
-    return { ...c, text: m[2], speaker: ids.get(m[1]) };
-  });
-  return { lines, speakers: Object.fromEntries([...ids].map(([name, id]) => [id, name])) };
-}
-
-// A transcript from a file's contents: Zoom's (or any) WebVTT, or JSON with
-// words ({ word|text, start, end, speaker }, as the app's transcriber gives).
+// A transcript saved earlier (or words JSON from another tool).
 function parseTranscript(name, content) {
-  if (/\.vtt$/i.test(name) || content.startsWith('WEBVTT')) {
-    const cues = parseVtt(content);
-    if (!cues.length) throw new TranscriptError(`${name} has no lines`);
-    const { lines, speakers } = splitSpeakers(cues);
-    return { words: linesToWords(lines), speakers, approx: true };
-  }
   let json;
   try {
     json = JSON.parse(content);
   } catch {
-    throw new TranscriptError(`${name} isn’t WebVTT or JSON`);
+    throw new TranscriptError(`${name} isn’t JSON`);
   }
   const raw = Array.isArray(json) ? json : json.words;
-  if (!Array.isArray(raw) || !raw.length) throw new TranscriptError(`${name} has no words (expected { words: [{ word, start, end }] })`);
-  const words = raw
-    .map((w) => ({ text: String(w.text ?? w.word ?? '').trim(), start: Number(w.start), end: Number(w.end), speaker: Number.isInteger(w.speaker) ? w.speaker : null }))
-    .filter((w) => w.text && Number.isFinite(w.start) && Number.isFinite(w.end))
-    .sort((a, b) => a.start - b.start);
-  return { words, speakers: json.speakers || {}, approx: Boolean(json.approx) };
+  if (!Array.isArray(raw) || !raw.length) throw new TranscriptError(`${name} has no words (expected { words: [{ word, start, end, speaker }] })`);
+  const transcript = fromWords(raw, { durationSec: 0 });
+  return { ...transcript, speakers: json.speakers || {} };
 }
 
 // How much of from–to the plan keeps: 'kept', 'cut' or 'partly cut'.
@@ -77,14 +56,22 @@ function status(segments, from, to) {
   return kept <= 0.01 ? 'cut' : 'partly cut';
 }
 
-const speakerName = (transcript, id) => (id === null || id === undefined ? null : transcript.speakers[id] ?? `Speaker ${Number(id) + 1}`);
+// A speaker's name, or "Speaker 2" ("Speaker 2, part 3" when per piece).
+function speakerName(transcript, id) {
+  if (id === null || id === undefined) return null;
+  if (transcript.speakers[id]) return transcript.speakers[id];
+  const [piece, n] = String(id).includes(':') ? String(id).split(':').map(Number) : [null, Number(id)];
+  return `Speaker ${n + 1}${piece === null ? '' : `, part ${piece + 1}`}`;
+}
 
 // The transcript as lines with their times, speakers and whether the plan
 // keeps them, optionally only from–to (source time).
 function lines(plan, transcript, { from = 0, to = Infinity } = {}) {
   const segments = keptSegments(plan);
-  return wordsToCues(transcript.words.filter((w) => w.end > from && w.start < to).map((w) => ({ word: w.text, start: w.start, end: w.end, speaker: w.speaker })))
-    .map((c) => ({ from: c.startSec, to: c.endSec, speaker: speakerName(transcript, c.speaker), text: c.text, status: status(segments, c.startSec, c.endSec) }));
+  // wordsToCues wants speakers as numbers, so number them for it.
+  const keys = [...new Set(transcript.words.map((w) => w.speaker))];
+  return wordsToCues(transcript.words.filter((w) => w.end > from && w.start < to).map((w) => ({ word: w.text, start: w.start, end: w.end, speaker: keys.indexOf(w.speaker) })))
+    .map((c) => ({ from: c.startSec, to: c.endSec, speakerId: keys[c.speaker] ?? null, speaker: speakerName(transcript, keys[c.speaker]), text: c.text, status: status(segments, c.startSec, c.endSec) }));
 }
 
 // Words as plain lowercase tokens, so "Kubernetes," matches "kubernetes".
@@ -107,6 +94,7 @@ function search(plan, transcript, phrase) {
       to: words[last].end,
       said: around(i, last + 1),
       context: around(i - 8, last + 9),
+      speakerId: words[i].speaker,
       speaker: speakerName(transcript, words[i].speaker),
       status: status(segments, words[i].start, words[last].end),
     });
@@ -132,4 +120,4 @@ function fillers(plan, transcript, { also = [] } = {}) {
   return found.sort((a, b) => a.from - b.from);
 }
 
-module.exports = { TranscriptError, FILLERS, parseTranscript, linesToWords, splitSpeakers, lines, search, fillers, status };
+module.exports = { TranscriptError, FILLERS, fromWords, parseTranscript, speakerName, lines, search, fillers, status };

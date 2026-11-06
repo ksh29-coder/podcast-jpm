@@ -21,10 +21,11 @@ Set up and look:
                                        Quiet stretches (seconds, dB) worth cutting
 
 Transcript:
-  import-transcript <plan> --file <zoom.vtt|words.json>
-                                       Use Zoom's transcript (or any WebVTT/words JSON)
-  transcribe <plan>                    Transcribe word by word (needs OPENROUTER_API_KEY)
-  speaker <plan> <id> --name <name>    Name a speaker
+  transcribe <plan> [--force]          Transcribe word by word with AI (needs
+                                       OPENROUTER_API_KEY); --force to do it again
+  import-transcript <plan> --file <words.json>
+                                       Use a transcript made earlier
+  speaker <plan> <id> --name <name>    Name a speaker (ids as transcript shows them)
   transcript <plan> [--from <s>] [--to <s>]
                                        What was said, line by line, and what's cut
   search <plan> --text <words>         Every place those words are said
@@ -97,7 +98,7 @@ const sourcePath = (file, plan) => (isUrl(plan.source.video) ? plan.source.video
 
 // The plan's transcript, from its own file next to the plan.
 async function loadTranscript(file, plan) {
-  if (!plan.source.transcript) fail(`No transcript yet; add one with: wave-edit import-transcript ${file} --file <zoom.vtt>, or wave-edit transcribe ${file}`);
+  if (!plan.source.transcript) fail(`No transcript yet; make one with: wave-edit transcribe ${file}`);
   try {
     return JSON.parse(await fs.readFile(path.resolve(path.dirname(file), plan.source.transcript), 'utf8'));
   } catch (e) {
@@ -110,13 +111,13 @@ async function saveTranscript(file, plan, transcript) {
   const name = `${path.basename(file).replace(/\.json$/i, '')}.transcript.json`;
   await save(path.join(path.dirname(file), name), transcript);
   await save(file, { ...plan, source: { ...plan.source, transcript: name } });
+  // Every speaker with what they're called for now, so they can be named.
+  const ids = [...new Set(transcript.words.map((w) => w.speaker).filter((s) => s !== null))];
   return {
     saved: true,
     transcript: name,
     words: transcript.words.length,
-    speakers: transcript.speakers,
-    approx: transcript.approx,
-    ...(transcript.approx ? { note: 'Word times are spread over each line, so cuts on single words are rough' } : {}),
+    speakers: Object.fromEntries(ids.map((id) => [id, transcripts.speakerName(transcript, id)])),
   };
 }
 
@@ -184,17 +185,20 @@ async function main(argv) {
       return change((p) => plans.addCut(p, { from: hits[0].from, to: hits[0].to, reason: o.reason || `said: "${hits[0].said}"` }));
     }
     case 'import-transcript': {
-      if (!o.file) fail('Say which transcript: --file <zoom.vtt|words.json>');
+      if (!o.file) fail('Say which transcript: --file <words.json>');
       const plan = await load(file);
       const content = await fs.readFile(o.file, 'utf8').catch((e) => fail(`Couldn’t read ${o.file}: ${e.message}`));
       return saveTranscript(file, plan, transcripts.parseTranscript(o.file, content));
     }
     case 'transcribe': {
       const plan = await load(file);
+      // It costs money, so a transcript isn't made twice by accident.
+      if (plan.source.transcript && !o.force) fail(`${file} already has a transcript (${plan.source.transcript}); add --force to make a new one`);
       const transcriber = openRouterTranscriber();
       if (!transcriber) fail('Transcribing needs OPENROUTER_API_KEY set');
       const { words, cost } = await transcriber.transcribeFile(sourcePath(file, plan));
-      const result = await saveTranscript(file, plan, transcripts.parseTranscript('words.json', JSON.stringify({ words })));
+      if (!words.length) fail('The transcriber heard no words');
+      const result = await saveTranscript(file, plan, transcripts.fromWords(words, { durationSec: plan.source.durationSec }));
       return { ...result, cost };
     }
     case 'speaker': {
@@ -227,7 +231,7 @@ async function main(argv) {
           next = added.plan;
           return added.change.item;
         });
-        return { plan: next, change: { op: 'add', kind: 'cut', items, ...(transcript.approx ? { note: 'Rough: this transcript times whole lines, not words' } : {}) } };
+        return { plan: next, change: { op: 'add', kind: 'cut', items } };
       });
     }
     case 'text':

@@ -57,7 +57,7 @@ npm run edit -- render ep.json --out final.mp4        # --low for a quick small 
 npm run edit -- remove ep.json <id>                   # undo any cut, text or chapter
 
 # Editing by what was said
-npm run edit -- import-transcript ep.json --file zoom-transcript.vtt   # or: transcribe ep.json
+npm run edit -- transcribe ep.json                   # AI, word by word, with speakers
 npm run edit -- speaker ep.json 0 --name "Alice Chen"
 npm run edit -- transcript ep.json --from 0 --to 300  # lines, speakers, and what's cut
 npm run edit -- search ep.json --text "kubernetes"
@@ -72,10 +72,12 @@ npm run edit -- fillers ep.json --apply               # cut every um/uh still in
 - Text styles: `lower-third`, `title`, `caption`, `label`, with optional `--x`/`--y` (0–1). Text is
   drawn by libass in Inter (in `assets/fonts`, SIL Open Font License), so it looks the same anywhere.
 - Chapters are written into the MP4, at their edited times.
-- **Transcripts** are kept word by word in `<plan>.transcript.json` next to the plan. Zoom's
-  transcript (WebVTT, "Name: what they said") gives speakers by name but only times whole lines,
-  so its word times are shared out over each line and single-word cuts are rough; `transcribe`
-  (MAI-Transcribe through OpenRouter, `OPENROUTER_API_KEY`) times every word.
+- **Transcripts** come from `transcribe` (MAI-Transcribe through OpenRouter, `OPENROUTER_API_KEY`),
+  which times every word, keeps fillers like "um", and tells speakers apart. They're kept in
+  `<plan>.transcript.json` next to the plan (`import-transcript` reuses one); `transcribe` won't
+  run (and charge) again without `--force`. Audio is transcribed in 40-minute pieces, and each
+  piece numbers its speakers afresh, so in longer recordings speakers are per piece ("1:0" is
+  the first speaker of the second piece) and each needs naming with `speaker`.
 - `cut --text` only cuts words said once in what's left of the edit; otherwise it lists each place
   so you can pick one with `--from`/`--to`. `fillers` looks for um/uh/erm…; add phrases that are
   often meant, like "you know", with `--also`.
