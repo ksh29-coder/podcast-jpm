@@ -38,6 +38,37 @@ Rejected Shorts and episodes, and uploads nobody posted, are deleted with their 
 Media paths in `data/episodes.json` are server-relative; the API returns them as absolute URLs
 (based on the request host, or `PUBLIC_BASE_URL` if set, e.g. behind a gateway).
 
+## Edit engine (`wave-edit`)
+
+Edits a long recording without changing it: an **edit plan** (JSON) lists the cuts, on-screen texts
+and chapters, and rendering turns the plan into a new video with ffmpeg. The same engine is meant
+to sit behind the Host Studio editor and AI editing agents, so the command line prints one JSON
+object per command and exits 1 with `{ ok: false, error }` when something is wrong.
+
+```sh
+npm run edit -- init ep.json --video recording.mp4
+npm run edit -- silences ep.json --min 1.5            # quiet stretches worth cutting
+npm run edit -- cut ep.json --from 0 --to 94.2 --reason "pre-show chatter"
+npm run edit -- text ep.json --from 95 --to 100 --style lower-third --text "Alice Chen" --subtitle "Platform Engineering"
+npm run edit -- chapter ep.json --at 95 --title "Intro"
+npm run edit -- show ep.json                         # the plan and the edited timeline
+npm run edit -- frame ep.json --at 96 --out check.jpg # one frame of the edit, texts included
+npm run edit -- render ep.json --out final.mp4        # --low for a quick small version
+npm run edit -- remove ep.json <id>                   # undo any cut, text or chapter
+```
+
+- **Times are seconds of the original recording**, so a cut never moves anything else; `show`
+  gives where each text and chapter lands in the edited video.
+- Changes take `--dry-run` to see them without saving, and a change that would break the plan
+  (say, a cut past the end) is refused.
+- Text styles: `lower-third`, `title`, `caption`, `label`, with optional `--x`/`--y` (0–1). Text is
+  drawn by libass in Inter (in `assets/fonts`, SIL Open Font License), so it looks the same anywhere.
+- Chapters are written into the MP4, at their edited times.
+- Code: `src/edit-engine/plan.js` (the plan, its timeline and checks, no ffmpeg) and
+  `src/edit-engine/ffmpeg.js` (probe, silences, frame, render).
+
+Long renders don't fit in a Vercel function; they're meant for a background worker.
+
 ## Deploy to Vercel
 
 The project's **Root Directory** must be `backend`. `api/index.js` runs the Express app as a
