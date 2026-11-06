@@ -219,7 +219,8 @@ function buildGraph(plan, { canvas, fps, inputs, seekFrom = 0, segments, shift =
     if (!zooms.length) continue;
     const e = zoomExpressions(zooms);
     const { width, height } = sizes[name];
-    parts.push(`[${streams[name]}]zoompan=z='${e.z}':x='${e.x}':y='${e.y}':d=1:s=${width}x${height}:fps=${fps}[${streams[name]}z]`);
+    // zoompan numbers its frames from 0, so put them back at `shift`.
+    parts.push(`[${streams[name]}]zoompan=z='${e.z}':x='${e.x}':y='${e.y}':d=1:s=${width}x${height}:fps=${fps},setpts=PTS+${shift}/TB[${streams[name]}z]`);
     streams[name] = `${streams[name]}z`;
   }
 
